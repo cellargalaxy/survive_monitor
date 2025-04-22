@@ -24,3 +24,4 @@ go.work.sum
 # env file
 .env
 survive_monitor
+survive_monitor.yaml
