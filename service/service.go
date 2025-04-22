@@ -45,6 +45,6 @@ func monitorSurvive(ctx context.Context, url string) bool {
 		return false
 	}
 	statusCode := response.StatusCode()
-	logrus.WithContext(ctx).WithFields(logrus.Fields{"statusCode": statusCode}).Info("检测存活，响应")
+	logrus.WithContext(ctx).WithFields(logrus.Fields{"url": url, "statusCode": statusCode}).Info("检测存活，响应")
 	return statusCode > 0 && statusCode < 500
 }
