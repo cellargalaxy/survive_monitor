@@ -14,5 +14,5 @@ type Config struct {
 }
 
 func (this Config) String() string {
-	return util.ToJsonString(this)
+	return util.JsonStruct2String(this)
 }

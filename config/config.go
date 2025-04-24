@@ -11,13 +11,13 @@ var Config = model.Config{}
 func init() {
 	ctx := util.GenCtx()
 
-	text, err := util.ReadFileWithString(ctx, "survive_monitor.yaml", "")
+	text, err := util.ReadFile2String(ctx, "survive_monitor.yaml", "")
 	if err != nil {
 		panic(err)
 	}
 
 	var config model.Config
-	err = util.UnmarshalYamlString(text, &config)
+	err = util.YamlString2Struct(ctx, text, &config)
 	if err != nil {
 		logrus.WithContext(ctx).WithFields(logrus.Fields{"err": err}).Error("加载配置，反序列化异常")
 		panic(err)
