@@ -9,6 +9,10 @@ const (
 	ListenAddress     = ":4343"
 )
 
+func init() {
+	util.Init(DefaultServerName)
+}
+
 type Config struct {
 	Cron string   `yaml:"cron" json:"cron"`
 	Urls []string `yaml:"urls" json:"urls"`
