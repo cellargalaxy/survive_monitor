@@ -10,6 +10,7 @@ const (
 )
 
 type Config struct {
+	Cron string   `yaml:"cron" json:"cron"`
 	Urls []string `yaml:"urls" json:"urls"`
 }
 
