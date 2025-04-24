@@ -14,9 +14,33 @@ if [ -z "$listen_port" ]; then
   listen_port="4343"
 fi
 
+while :; do
+  if [ ! -z $wx_app_id ]; then
+    break
+  fi
+  read -p "please enter wx_app_id(required):" wx_app_id
+done
+
+while :; do
+  if [ ! -z $wx_secret ]; then
+    break
+  fi
+  read -p "please enter wx_secret(required):" wx_secret
+done
+
+while :; do
+  if [ ! -z $wx_user ]; then
+    break
+  fi
+  read -p "please enter wx_user(required):" wx_user
+done
+
 echo
 echo "server_name: $server_name"
 echo "listen_port: $listen_port"
+echo "wx_app_id: $wx_app_id"
+echo "wx_secret: $wx_secret"
+echo "wx_user: $wx_user"
 echo "input any key go on, or control+c over"
 read
 
@@ -38,6 +62,9 @@ docker run -d \
   -v $server_name'_resource':/resource \
   -p $listen_port:4343 \
   -e server_name=$server_name \
+  -e wx_app_id=$wx_app_id \
+  -e wx_secret=$wx_secret \
+  -e wx_user=$wx_user \
   $server_name
 
 echo 'all finish'
