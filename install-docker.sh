@@ -14,6 +14,13 @@ if [ -z "$listen_port" ]; then
   listen_port="4343"
 fi
 
+if [ -z $resource ]; then
+  read -p "please enter resource(default:volume):" resource
+fi
+if [ -z $resource ]; then
+  resource=$server_name'_resource'
+fi
+
 while :; do
   if [ ! -z $wx_app_id ]; then
     break
@@ -59,7 +66,7 @@ docker run -d \
   --restart=always \
   --name $server_name \
   -v log:/log \
-  -v $server_name'_resource':/resource \
+  -v $resource:/resource \
   -p $listen_port:4343 \
   -e server_name=$server_name \
   -e wx_app_id=$wx_app_id \
