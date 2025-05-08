@@ -4,7 +4,7 @@ go 1.24
 
 require (
 	github.com/cellargalaxy/go_common v0.0.0-20250424081038-bd85c508ab02
-	github.com/cellargalaxy/msg_gateway v0.0.0-20250424075842-d65adf4131b4
+	github.com/cellargalaxy/msg_gateway v0.0.0-20250508131425-10f248819b82
 	github.com/gin-gonic/gin v1.10.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/sirupsen/logrus v1.9.3
@@ -21,9 +21,7 @@ require (
 	github.com/clbanning/mxj/v2 v2.7.0 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
-	github.com/ebitengine/purego v0.8.2 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.9 // indirect
-	github.com/gen2brain/go-fitz v1.24.14 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
@@ -37,7 +35,6 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/jupiterrider/ffi v0.4.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
