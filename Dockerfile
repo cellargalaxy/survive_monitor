@@ -3,8 +3,14 @@ ENV GOPROXY="https://goproxy.cn,direct"
 ENV GO111MODULE=on
 WORKDIR /
 COPY . .
-RUN go mod download
-RUN CGO_ENABLED=0 GOOS=linux go build -o /survive_monitor
+RUN if [ -f survive_monitor ] && [ -x survive_monitor ]; then \
+        echo "Binary already exists, skipping build"; \
+        cp survive_monitor /survive_monitor; \
+    else \
+        echo "Binary not found, building from source"; \
+        go mod download && \
+        CGO_ENABLED=0 GOOS=linux go build -o /survive_monitor; \
+    fi
 
 FROM golang:1.24-alpine
 COPY --from=builder /survive_monitor /survive_monitor
