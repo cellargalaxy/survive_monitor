@@ -3,8 +3,9 @@ ENV GOPROXY="https://goproxy.cn,direct"
 ENV GO111MODULE=on
 WORKDIR /
 COPY . .
-RUN if [ -f survive_monitor ] && [ -x survive_monitor ]; then \
+RUN if [ -s survive_monitor ]; then \
         echo "Binary already exists, skipping build"; \
+        chmod +x survive_monitor && \
         cp survive_monitor /survive_monitor; \
     else \
         echo "Binary not found, building from source"; \
