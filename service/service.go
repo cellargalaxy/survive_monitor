@@ -42,9 +42,7 @@ func (s *StatusStore) AddRecord(urlStr string, checkTime time.Time, alive bool) 
 		CheckTime: checkTime,
 		Alive:     alive,
 	}
-	for i := 0; i < 10000; i++ {
-		s.records[urlStr] = append(s.records[urlStr], record)
-	}
+	s.records[urlStr] = append(s.records[urlStr], record)
 }
 
 // CleanOldRecords 清除7天以前的数据

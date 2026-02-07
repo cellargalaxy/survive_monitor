@@ -64,17 +64,9 @@
             margin-top: 4px;
         }
 
-        .summary-card.total .number {
-            color: #333;
-        }
-
-        .summary-card.online .number {
-            color: #52c41a;
-        }
-
-        .summary-card.offline .number {
-            color: #ff4d4f;
-        }
+        .summary-card.total .number { color: #333; }
+        .summary-card.online .number { color: #52c41a; }
+        .summary-card.offline .number { color: #ff4d4f; }
 
         .domain-section {
             background: #fff;
@@ -96,6 +88,23 @@
 
         .domain-header:hover {
             background: #fafafa;
+        }
+
+        .domain-header .arrow {
+            font-size: 12px;
+            color: #aaa;
+            transition: transform 0.2s;
+            margin-right: 8px;
+        }
+
+        .domain-header .arrow.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .domain-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
         .domain-name {
@@ -133,16 +142,20 @@
             padding: 0;
         }
 
-        .url-row {
-            display: flex;
-            align-items: center;
-            padding: 12px 24px;
+        .url-card {
+            padding: 16px 24px;
             border-bottom: 1px solid #f5f5f5;
-            gap: 16px;
         }
 
-        .url-row:last-child {
+        .url-card:last-child {
             border-bottom: none;
+        }
+
+        .url-card-top {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
         }
 
         .url-status-dot {
@@ -185,57 +198,96 @@
             word-break: break-all;
         }
 
+        .url-meta {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-shrink: 0;
+        }
+
+        .url-uptime {
+            font-size: 13px;
+            font-weight: 600;
+            color: #52c41a;
+        }
+
+        .url-uptime.low {
+            color: #faad14;
+        }
+
+        .url-uptime.critical {
+            color: #ff4d4f;
+        }
+
         .url-last-check {
             font-size: 12px;
             color: #aaa;
             flex-shrink: 0;
         }
 
-        .timeline-container {
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
-            gap: 1px;
-        }
-
-        .timeline-block {
-            width: 6px;
-            height: 24px;
-            border-radius: 2px;
+        /* 时间线热力图 - 使用canvas */
+        .timeline-wrapper {
             position: relative;
+            width: 100%;
+            margin-top: 4px;
         }
 
-        .timeline-block.alive {
-            background: #52c41a;
-        }
-
-        .timeline-block.dead {
-            background: #ff4d4f;
-        }
-
-        .timeline-block.empty {
-            background: #e8e8e8;
-        }
-
-        .timeline-block .tooltip {
-            display: none;
-            position: absolute;
-            bottom: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.8);
-            color: #fff;
-            font-size: 11px;
-            padding: 4px 8px;
+        .timeline-canvas-container {
+            width: 100%;
+            height: 28px;
             border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+            cursor: crosshair;
+        }
+
+        .timeline-canvas-container canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .timeline-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 4px;
+        }
+
+        .timeline-labels span {
+            font-size: 10px;
+            color: #bbb;
+        }
+
+        .timeline-tooltip {
+            display: none;
+            position: fixed;
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 6px;
             white-space: nowrap;
-            margin-bottom: 4px;
-            z-index: 10;
+            z-index: 1000;
+            pointer-events: none;
+            line-height: 1.5;
+        }
+
+        /* 日期分隔标记 */
+        .day-markers {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
             pointer-events: none;
         }
 
-        .timeline-block:hover .tooltip {
-            display: block;
+        .day-marker {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: rgba(0, 0, 0, 0.06);
         }
 
         .loading {
@@ -259,33 +311,79 @@
             color: #bbb;
         }
 
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #888;
+        }
+
+        .legend-color {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+        }
+
+        .legend-color.alive { background: #52c41a; }
+        .legend-color.dead { background: #ff4d4f; }
+        .legend-color.nodata { background: #e8e8e8; }
+
         @media (max-width: 768px) {
             body {
                 padding: 12px;
             }
 
-            .url-row {
+            .header h1 {
+                font-size: 22px;
+            }
+
+            .summary-bar {
+                gap: 10px;
+            }
+
+            .summary-card {
+                padding: 14px 18px;
+                min-width: 90px;
+                flex: 1;
+            }
+
+            .summary-card .number {
+                font-size: 26px;
+            }
+
+            .domain-header {
+                padding: 14px 16px;
+            }
+
+            .domain-name {
+                font-size: 14px;
+            }
+
+            .url-card {
+                padding: 14px 16px;
+            }
+
+            .url-card-top {
                 flex-wrap: wrap;
                 gap: 8px;
             }
 
-            .timeline-container {
+            .url-meta {
                 width: 100%;
-                overflow-x: auto;
-                padding: 4px 0;
+                justify-content: flex-start;
             }
 
-            .summary-bar {
-                gap: 12px;
-            }
-
-            .summary-card {
-                padding: 14px 20px;
-                min-width: 100px;
-            }
-
-            .summary-card .number {
-                font-size: 28px;
+            .timeline-canvas-container {
+                height: 24px;
             }
         }
     </style>
@@ -294,7 +392,13 @@
 
 <div class="header">
     <h1>📡 服务存活监控</h1>
-    <div class="subtitle">最近 7 天的服务存活检测记录</div>
+    <div class="subtitle">最近 7 天的服务存活检测记录（每 10 分钟检测一次）</div>
+</div>
+
+<div class="legend">
+    <div class="legend-item"><div class="legend-color alive"></div>在线</div>
+    <div class="legend-item"><div class="legend-color dead"></div>离线</div>
+    <div class="legend-item"><div class="legend-color nodata"></div>无数据</div>
 </div>
 
 <div id="summary-bar" class="summary-bar"></div>
@@ -303,42 +407,42 @@
 </div>
 <div class="last-update" id="last-update"></div>
 
+<!-- 全局tooltip -->
+<div class="timeline-tooltip" id="global-tooltip"></div>
+
 <script>
     (function () {
-        // 自动识别 API 路径：基于当前页面路径的相对位置
+
+        // =============================================
+        // API路径识别
+        // =============================================
         function getApiUrl() {
             var pagePath = window.location.pathname;
             var segments = pagePath.split('/');
-
-            // 找到"static"目录的索引
             var staticIndex = segments.indexOf('static');
-
             if (staticIndex !== -1) {
-                // 重新构建到static目录之前的路径
-                var basePath = '';
-                for (var i = 1; i < staticIndex; i++) { // 从1开始跳过第一个空字符串
-                    basePath += '/' + segments[i];
-                }
-                return basePath + '/api/status';
+                var baseParts = segments.slice(0, staticIndex);
+                return baseParts.join('/') + '/api/status';
             }
-
-            // 备用方案：使用原来的逻辑
             var dir = pagePath.substring(0, pagePath.lastIndexOf('/') + 1);
             return dir + 'api/status';
         }
 
         var apiUrl = getApiUrl();
+        var globalTooltip = document.getElementById('global-tooltip');
 
+        // =============================================
+        // 数据获取
+        // =============================================
         function fetchStatus() {
             var xhr = new XMLHttpRequest();
             xhr.open('GET', apiUrl, true);
             xhr.onreadystatechange = function () {
                 if (xhr.readyState !== 4) return;
-                var loadingEl = document.getElementById('loading');
                 if (xhr.status === 200) {
                     try {
                         var resp = JSON.parse(xhr.responseText);
-                        if (resp.code === 1) {
+                        if (resp.code === 0 || resp.code === 1) {
                             renderData(resp.data);
                         } else {
                             showError('接口返回异常: ' + (resp.msg || '未知错误'));
@@ -354,8 +458,7 @@
         }
 
         function showError(msg) {
-            var app = document.getElementById('app');
-            app.innerHTML = '<div class="error-msg">' + escapeHtml(msg) + '</div>';
+            document.getElementById('app').innerHTML = '<div class="error-msg">' + escapeHtml(msg) + '</div>';
         }
 
         function escapeHtml(str) {
@@ -364,13 +467,190 @@
             return div.innerHTML;
         }
 
+        // =============================================
+        // 时间槽化：将7天分成固定数量的槽
+        // 每10分钟一个槽 = 7*24*6 = 1008个槽
+        // =============================================
+        var SLOT_COUNT = 1008; // 7天 × 24小时 × 6（每10分钟一个）
+        var SLOT_DURATION = 10 * 60 * 1000; // 10分钟，毫秒
+
+        function buildSlots(records) {
+            var now = Date.now();
+            var startTime = now - 7 * 24 * 60 * 60 * 1000;
+
+            // 初始化全部槽为null（无数据）
+            var slots = new Array(SLOT_COUNT);
+            for (var i = 0; i < SLOT_COUNT; i++) {
+                slots[i] = null; // null = 无数据, true = 在线, false = 离线
+            }
+
+            if (!records || records.length === 0) return { slots: slots, startTime: startTime };
+
+            for (var r = 0; r < records.length; r++) {
+                var rec = records[r];
+                var t = parseTime(rec.check_time);
+                if (t < startTime) continue;
+                var idx = Math.floor((t - startTime) / SLOT_DURATION);
+                if (idx < 0) idx = 0;
+                if (idx >= SLOT_COUNT) idx = SLOT_COUNT - 1;
+
+                // 如果该槽已经有记录，只要有一次离线就标记为离线
+                if (slots[idx] === null) {
+                    slots[idx] = rec.alive;
+                } else if (rec.alive === false) {
+                    slots[idx] = false;
+                }
+            }
+
+            return { slots: slots, startTime: startTime };
+        }
+
+        function parseTime(str) {
+            // "2026-02-08 00:50:02"
+            var parts = str.split(' ');
+            var d = parts[0].split('-');
+            var t = parts[1].split(':');
+            return new Date(
+                parseInt(d[0]), parseInt(d[1]) - 1, parseInt(d[2]),
+                parseInt(t[0]), parseInt(t[1]), parseInt(t[2])
+            ).getTime();
+        }
+
+        function calcUptime(records) {
+            if (!records || records.length === 0) return null;
+            var alive = 0;
+            for (var i = 0; i < records.length; i++) {
+                if (records[i].alive) alive++;
+            }
+            return (alive / records.length * 100).toFixed(2);
+        }
+
+        // =============================================
+        // Canvas绘制时间线
+        // =============================================
+        function drawTimeline(canvas, slotData) {
+            var slots = slotData.slots;
+            var ctx = canvas.getContext('2d');
+            var dpr = window.devicePixelRatio || 1;
+            var rect = canvas.parentElement.getBoundingClientRect();
+            var w = rect.width;
+            var h = rect.height;
+
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            ctx.scale(dpr, dpr);
+
+            var slotWidth = w / SLOT_COUNT;
+
+            for (var i = 0; i < SLOT_COUNT; i++) {
+                var x = i * slotWidth;
+                var sw = Math.max(slotWidth, 0.5);
+
+                if (slots[i] === true) {
+                    ctx.fillStyle = '#52c41a';
+                } else if (slots[i] === false) {
+                    ctx.fillStyle = '#ff4d4f';
+                } else {
+                    ctx.fillStyle = '#e8e8e8';
+                }
+                ctx.fillRect(x, 0, sw + 0.5, h);
+            }
+
+            // 绘制日期分隔线
+            var startTime = slotData.startTime;
+            ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+            ctx.lineWidth = 1;
+            for (var d = 1; d <= 6; d++) {
+                var dayTime = startTime + d * 24 * 60 * 60 * 1000;
+                var dayX = (dayTime - startTime) / (7 * 24 * 60 * 60 * 1000) * w;
+                ctx.beginPath();
+                ctx.moveTo(Math.round(dayX) + 0.5, 0);
+                ctx.lineTo(Math.round(dayX) + 0.5, h);
+                ctx.stroke();
+            }
+
+            return slotData;
+        }
+
+        // =============================================
+        // 时间线tooltip交互
+        // =============================================
+        function setupTimelineInteraction(container, slotData) {
+            container.addEventListener('mousemove', function (e) {
+                var rect = container.getBoundingClientRect();
+                var x = e.clientX - rect.left;
+                var ratio = x / rect.width;
+                var idx = Math.floor(ratio * SLOT_COUNT);
+                if (idx < 0) idx = 0;
+                if (idx >= SLOT_COUNT) idx = SLOT_COUNT - 1;
+
+                var slotTime = slotData.startTime + idx * SLOT_DURATION;
+                var slotEndTime = slotTime + SLOT_DURATION;
+                var status = slotData.slots[idx];
+                var statusText = status === true ? '✅ 在线' : (status === false ? '❌ 离线' : '⬜ 无数据');
+
+                globalTooltip.innerHTML =
+                    formatTimestamp(slotTime) + ' ~ ' + formatTimestamp(slotEndTime) +
+                    '<br>' + statusText;
+                globalTooltip.style.display = 'block';
+
+                var tx = e.clientX + 12;
+                var ty = e.clientY - 50;
+                if (tx + 220 > window.innerWidth) tx = e.clientX - 220;
+                if (ty < 0) ty = e.clientY + 20;
+                globalTooltip.style.left = tx + 'px';
+                globalTooltip.style.top = ty + 'px';
+            });
+
+            container.addEventListener('mouseleave', function () {
+                globalTooltip.style.display = 'none';
+            });
+
+            // 触摸支持
+            container.addEventListener('touchmove', function (e) {
+                e.preventDefault();
+                var touch = e.touches[0];
+                var rect = container.getBoundingClientRect();
+                var x = touch.clientX - rect.left;
+                var ratio = x / rect.width;
+                var idx = Math.floor(ratio * SLOT_COUNT);
+                if (idx < 0) idx = 0;
+                if (idx >= SLOT_COUNT) idx = SLOT_COUNT - 1;
+
+                var slotTime = slotData.startTime + idx * SLOT_DURATION;
+                var slotEndTime = slotTime + SLOT_DURATION;
+                var status = slotData.slots[idx];
+                var statusText = status === true ? '✅ 在线' : (status === false ? '❌ 离线' : '⬜ 无数据');
+
+                globalTooltip.innerHTML =
+                    formatTimestamp(slotTime) + ' ~ ' + formatTimestamp(slotEndTime) +
+                    '<br>' + statusText;
+                globalTooltip.style.display = 'block';
+                globalTooltip.style.left = (touch.clientX + 12) + 'px';
+                globalTooltip.style.top = (touch.clientY - 50) + 'px';
+            }, { passive: false });
+
+            container.addEventListener('touchend', function () {
+                globalTooltip.style.display = 'none';
+            });
+        }
+
+        function formatTimestamp(ts) {
+            var d = new Date(ts);
+            var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+            return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+                ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        }
+
+        // =============================================
+        // 渲染
+        // =============================================
         function renderData(data) {
             if (!data || data.length === 0) {
                 document.getElementById('app').innerHTML = '<div class="loading">暂无监控数据</div>';
                 return;
             }
 
-            // 按域名分组
             var domainMap = {};
             var totalCount = 0;
             var onlineCount = 0;
@@ -379,29 +659,27 @@
             for (var i = 0; i < data.length; i++) {
                 var item = data[i];
                 var domain = item.domain || '未知';
-                if (!domainMap[domain]) {
-                    domainMap[domain] = [];
-                }
+                if (!domainMap[domain]) domainMap[domain] = [];
                 domainMap[domain].push(item);
                 totalCount++;
 
-                // 最新一条记录判断状态
                 var lastAlive = getLastAlive(item.records);
                 if (lastAlive === true) onlineCount++;
                 else if (lastAlive === false) offlineCount++;
             }
 
-            // 渲染摘要
+            // 摘要
             var summaryBar = document.getElementById('summary-bar');
             summaryBar.innerHTML =
                 '<div class="summary-card total"><div class="number">' + totalCount + '</div><div class="label">监控总数</div></div>' +
                 '<div class="summary-card online"><div class="number">' + onlineCount + '</div><div class="label">在线</div></div>' +
                 '<div class="summary-card offline"><div class="number">' + offlineCount + '</div><div class="label">离线</div></div>';
 
-            // 渲染域名分组
+            // 域名分组
             var app = document.getElementById('app');
             var html = '';
             var domains = Object.keys(domainMap).sort();
+            var timelineInfos = []; // 记录需要绘制的canvas信息
 
             for (var d = 0; d < domains.length; d++) {
                 var domainName = domains[d];
@@ -415,16 +693,6 @@
                     else if (la === false) domainOffline++;
                 }
 
-                html += '<div class="domain-section">';
-                html += '<div class="domain-header" onclick="toggleDomain(this)">';
-                html += '<span class="domain-name">' + escapeHtml(domainName) + '</span>';
-                html += '<div class="domain-stats">';
-                if (domainOnline > 0) html += '<span class="badge badge-online">' + domainOnline + ' 在线</span>';
-                if (domainOffline > 0) html += '<span class="badge badge-offline">' + domainOffline + ' 离线</span>';
-                html += '</div>';
-                html += '</div>';
-                html += '<div class="domain-body">';
-
                 // 排序：离线的排前面
                 urls.sort(function (a, b) {
                     var aAlive = getLastAlive(a.records);
@@ -435,20 +703,72 @@
                     return 0;
                 });
 
+                html += '<div class="domain-section">';
+                html += '<div class="domain-header" onclick="toggleDomain(this)">';
+                html += '<div class="domain-left">';
+                html += '<span class="arrow">▼</span>';
+                html += '<span class="domain-name">' + escapeHtml(domainName) + '</span>';
+                html += '</div>';
+                html += '<div class="domain-stats">';
+                if (domainOnline > 0) html += '<span class="badge badge-online">' + domainOnline + ' 在线</span>';
+                if (domainOffline > 0) html += '<span class="badge badge-offline">' + domainOffline + ' 离线</span>';
+                html += '</div>';
+                html += '</div>';
+                html += '<div class="domain-body">';
+
                 for (var u = 0; u < urls.length; u++) {
                     var item = urls[u];
                     var alive = getLastAlive(item.records);
                     var statusClass = alive === true ? 'online' : (alive === false ? 'offline' : 'unknown');
                     var lastCheck = getLastCheckTime(item.records);
+                    var uptime = calcUptime(item.records);
+                    var uptimeClass = '';
+                    if (uptime !== null) {
+                        var uptimeVal = parseFloat(uptime);
+                        if (uptimeVal < 90) uptimeClass = 'critical';
+                        else if (uptimeVal < 99) uptimeClass = 'low';
+                    }
 
-                    html += '<div class="url-row">';
+                    var canvasId = 'canvas-' + d + '-' + u;
+                    var slotData = buildSlots(item.records);
+                    timelineInfos.push({ id: canvasId, slotData: slotData });
+
+                    // 时间标签
+                    var now = Date.now();
+                    var startTime = now - 7 * 24 * 60 * 60 * 1000;
+                    var dayLabels = [];
+                    for (var dl = 0; dl <= 7; dl++) {
+                        var dt = new Date(startTime + dl * 24 * 60 * 60 * 1000);
+                        var pad2 = function (n) { return n < 10 ? '0' + n : '' + n; };
+                        dayLabels.push(pad2(dt.getMonth() + 1) + '-' + pad2(dt.getDate()));
+                    }
+
+                    html += '<div class="url-card">';
+                    html += '<div class="url-card-top">';
                     html += '<div class="url-status-dot ' + statusClass + '"></div>';
                     html += '<div class="url-info">';
                     html += '<div class="url-path">' + escapeHtml(item.path || '/') + '</div>';
                     html += '<div class="url-full">' + escapeHtml(item.url) + '</div>';
                     html += '</div>';
-                    html += '<div class="timeline-container">' + renderTimeline(item.records) + '</div>';
+                    html += '<div class="url-meta">';
+                    if (uptime !== null) {
+                        html += '<div class="url-uptime ' + uptimeClass + '">' + uptime + '%</div>';
+                    }
                     html += '<div class="url-last-check">' + (lastCheck ? escapeHtml(lastCheck) : '-') + '</div>';
+                    html += '</div>';
+                    html += '</div>';
+
+                    html += '<div class="timeline-wrapper">';
+                    html += '<div class="timeline-canvas-container" id="container-' + canvasId + '">';
+                    html += '<canvas id="' + canvasId + '"></canvas>';
+                    html += '</div>';
+                    html += '<div class="timeline-labels">';
+                    for (var lb = 0; lb < dayLabels.length; lb++) {
+                        html += '<span>' + dayLabels[lb] + '</span>';
+                    }
+                    html += '</div>';
+                    html += '</div>';
+
                     html += '</div>';
                 }
 
@@ -457,9 +777,24 @@
 
             app.innerHTML = html;
 
+            // 绘制所有canvas
+            requestAnimationFrame(function () {
+                for (var t = 0; t < timelineInfos.length; t++) {
+                    var info = timelineInfos[t];
+                    var canvas = document.getElementById(info.id);
+                    if (canvas) {
+                        var drawnData = drawTimeline(canvas, info.slotData);
+                        var container = document.getElementById('container-' + info.id);
+                        if (container) {
+                            setupTimelineInteraction(container, drawnData);
+                        }
+                    }
+                }
+            });
+
             // 更新时间
-            var now = new Date();
-            document.getElementById('last-update').textContent = '页面加载时间: ' + formatDate(now);
+            var nowDate = new Date();
+            document.getElementById('last-update').textContent = '数据刷新时间: ' + formatDate(nowDate) + ' · 每60秒自动刷新';
         }
 
         function getLastAlive(records) {
@@ -472,30 +807,8 @@
             return records[records.length - 1].check_time;
         }
 
-        function renderTimeline(records) {
-            if (!records || records.length === 0) return '';
-
-            // 将7天划分为若干时间段，最多显示最近 48 个块（每块约3.5小时）
-            // 简化处理：取最近的记录，最多显示最近50条
-            var maxBlocks = 2016;
-            var start = Math.max(0, records.length - maxBlocks);
-            var html = '';
-
-            for (var i = start; i < records.length; i++) {
-                var r = records[i];
-                var cls = r.alive ? 'alive' : 'dead';
-                html += '<div class="timeline-block ' + cls + '">';
-                html += '<div class="tooltip">' + escapeHtml(r.check_time) + ' - ' + (r.alive ? '在线' : '离线') + '</div>';
-                html += '</div>';
-            }
-
-            return html;
-        }
-
         function formatDate(d) {
-            var pad = function (n) {
-                return n < 10 ? '0' + n : '' + n;
-            };
+            var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
             return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
                 ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
         }
@@ -505,15 +818,27 @@
 
         // 每60秒自动刷新
         setInterval(fetchStatus, 60000);
+
+        // 窗口大小变化时重绘
+        var resizeTimer;
+        window.addEventListener('resize', function () {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(function () {
+                fetchStatus();
+            }, 300);
+        });
     })();
 
     // 域名折叠/展开
     function toggleDomain(el) {
         var body = el.nextElementSibling;
+        var arrow = el.querySelector('.arrow');
         if (body.style.display === 'none') {
             body.style.display = '';
+            if (arrow) arrow.classList.remove('collapsed');
         } else {
             body.style.display = 'none';
+            if (arrow) arrow.classList.add('collapsed');
         }
     }
 </script>
