@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/cellargalaxy/go_common/util"
 	"github.com/cellargalaxy/msg_gateway/sdk"
 	"github.com/cellargalaxy/survive_monitor/config"
@@ -20,19 +22,18 @@ func MonitorAndAlarm(ctx context.Context, url string) bool {
 	if ok {
 		return ok
 	}
-	sdk.SendTemplateText(ctx, "通用消息", "", fmt.Sprintf("服务离线：%s", url))
+	sdk.SendTemplateText(ctx, "通用消息", config.Config.BoardUrl, fmt.Sprintf("服务离线：%s", url))
 	return ok
 }
 func MonitorSurvive(ctx context.Context, url string) bool {
-	return monitorSurvive(ctx, url)
-	//for i := 0; i < 5; i++ {
-	//	ok := monitorSurvive(ctx, url)
-	//	if ok {
-	//		return true
-	//	}
-	//	time.Sleep(time.Second * 5)
-	//}
-	//return false
+	for i := 0; i < 5; i++ {
+		ok := monitorSurvive(ctx, url)
+		if ok {
+			return true
+		}
+		time.Sleep(time.Second)
+	}
+	return false
 }
 func monitorSurvive(ctx context.Context, url string) bool {
 	response, err := util.GetHttpSpiderRequest(ctx).Get(url)

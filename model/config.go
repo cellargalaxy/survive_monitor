@@ -14,8 +14,9 @@ func init() {
 }
 
 type Config struct {
-	Cron string   `yaml:"cron" json:"cron"`
-	Urls []string `yaml:"urls" json:"urls"`
+	BoardUrl string   `yaml:"board_url" json:"board_url"`
+	Cron     string   `yaml:"cron" json:"cron"`
+	Urls     []string `yaml:"urls" json:"urls"`
 }
 
 func (this Config) String() string {
