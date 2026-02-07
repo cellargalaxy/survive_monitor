@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>服务存活监控</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f0f2f5;
+            color: #333;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+
+        .header .subtitle {
+            font-size: 14px;
+            color: #888;
+        }
+
+        .summary-bar {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin-bottom: 32px;
+            flex-wrap: wrap;
+        }
+
+        .summary-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px 32px;
+            text-align: center;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            min-width: 140px;
+        }
+
+        .summary-card .number {
+            font-size: 36px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .summary-card .label {
+            font-size: 13px;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        .summary-card.total .number {
+            color: #333;
+        }
+
+        .summary-card.online .number {
+            color: #52c41a;
+        }
+
+        .summary-card.offline .number {
+            color: #ff4d4f;
+        }
+
+        .domain-section {
+            background: #fff;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+        }
+
+        .domain-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .domain-header:hover {
+            background: #fafafa;
+        }
+
+        .domain-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+
+        .domain-stats {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .domain-stats .badge {
+            font-size: 12px;
+            padding: 2px 10px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+
+        .badge-online {
+            background: #f6ffed;
+            color: #52c41a;
+            border: 1px solid #b7eb8f;
+        }
+
+        .badge-offline {
+            background: #fff2f0;
+            color: #ff4d4f;
+            border: 1px solid #ffccc7;
+        }
+
+        .domain-body {
+            padding: 0;
+        }
+
+        .url-row {
+            display: flex;
+            align-items: center;
+            padding: 12px 24px;
+            border-bottom: 1px solid #f5f5f5;
+            gap: 16px;
+        }
+
+        .url-row:last-child {
+            border-bottom: none;
+        }
+
+        .url-status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .url-status-dot.online {
+            background: #52c41a;
+            box-shadow: 0 0 6px rgba(82, 196, 26, 0.4);
+        }
+
+        .url-status-dot.offline {
+            background: #ff4d4f;
+            box-shadow: 0 0 6px rgba(255, 77, 79, 0.4);
+        }
+
+        .url-status-dot.unknown {
+            background: #d9d9d9;
+        }
+
+        .url-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .url-path {
+            font-size: 14px;
+            font-weight: 500;
+            color: #333;
+            word-break: break-all;
+        }
+
+        .url-full {
+            font-size: 12px;
+            color: #aaa;
+            margin-top: 2px;
+            word-break: break-all;
+        }
+
+        .url-last-check {
+            font-size: 12px;
+            color: #aaa;
+            flex-shrink: 0;
+        }
+
+        .timeline-container {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 1px;
+        }
+
+        .timeline-block {
+            width: 6px;
+            height: 24px;
+            border-radius: 2px;
+            position: relative;
+        }
+
+        .timeline-block.alive {
+            background: #52c41a;
+        }
+
+        .timeline-block.dead {
+            background: #ff4d4f;
+        }
+
+        .timeline-block.empty {
+            background: #e8e8e8;
+        }
+
+        .timeline-block .tooltip {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+            margin-bottom: 4px;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .timeline-block:hover .tooltip {
+            display: block;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: #aaa;
+            font-size: 16px;
+        }
+
+        .error-msg {
+            text-align: center;
+            padding: 60px;
+            color: #ff4d4f;
+            font-size: 16px;
+        }
+
+        .last-update {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 12px;
+            color: #bbb;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 12px;
+            }
+
+            .url-row {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+
+            .timeline-container {
+                width: 100%;
+                overflow-x: auto;
+                padding: 4px 0;
+            }
+
+            .summary-bar {
+                gap: 12px;
+            }
+
+            .summary-card {
+                padding: 14px 20px;
+                min-width: 100px;
+            }
+
+            .summary-card .number {
+                font-size: 28px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>📡 服务存活监控</h1>
+    <div class="subtitle">最近 7 天的服务存活检测记录</div>
+</div>
+
+<div id="summary-bar" class="summary-bar"></div>
+<div id="app">
+    <div class="loading" id="loading">加载中...</div>
+</div>
+<div class="last-update" id="last-update"></div>
+
+<script>
+    (function () {
+        // 自动识别 API 路径：基于当前页面路径的相对位置
+        function getApiUrl() {
+            var pagePath = window.location.pathname;
+            var segments = pagePath.split('/');
+
+            // 找到"static"目录的索引
+            var staticIndex = segments.indexOf('static');
+
+            if (staticIndex !== -1) {
+                // 重新构建到static目录之前的路径
+                var basePath = '';
+                for (var i = 1; i < staticIndex; i++) { // 从1开始跳过第一个空字符串
+                    basePath += '/' + segments[i];
+                }
+                return basePath + '/api/status';
+            }
+
+            // 备用方案：使用原来的逻辑
+            var dir = pagePath.substring(0, pagePath.lastIndexOf('/') + 1);
+            return dir + 'api/status';
+        }
+
+        var apiUrl = getApiUrl();
+
+        function fetchStatus() {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', apiUrl, true);
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState !== 4) return;
+                var loadingEl = document.getElementById('loading');
+                if (xhr.status === 200) {
+                    try {
+                        var resp = JSON.parse(xhr.responseText);
+                        if (resp.code === 1) {
+                            renderData(resp.data);
+                        } else {
+                            showError('接口返回异常: ' + (resp.msg || '未知错误'));
+                        }
+                    } catch (e) {
+                        showError('解析响应失败: ' + e.message);
+                    }
+                } else {
+                    showError('请求失败，HTTP ' + xhr.status);
+                }
+            };
+            xhr.send();
+        }
+
+        function showError(msg) {
+            var app = document.getElementById('app');
+            app.innerHTML = '<div class="error-msg">' + escapeHtml(msg) + '</div>';
+        }
+
+        function escapeHtml(str) {
+            var div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function renderData(data) {
+            if (!data || data.length === 0) {
+                document.getElementById('app').innerHTML = '<div class="loading">暂无监控数据</div>';
+                return;
+            }
+
+            // 按域名分组
+            var domainMap = {};
+            var totalCount = 0;
+            var onlineCount = 0;
+            var offlineCount = 0;
+
+            for (var i = 0; i < data.length; i++) {
+                var item = data[i];
+                var domain = item.domain || '未知';
+                if (!domainMap[domain]) {
+                    domainMap[domain] = [];
+                }
+                domainMap[domain].push(item);
+                totalCount++;
+
+                // 最新一条记录判断状态
+                var lastAlive = getLastAlive(item.records);
+                if (lastAlive === true) onlineCount++;
+                else if (lastAlive === false) offlineCount++;
+            }
+
+            // 渲染摘要
+            var summaryBar = document.getElementById('summary-bar');
+            summaryBar.innerHTML =
+                '<div class="summary-card total"><div class="number">' + totalCount + '</div><div class="label">监控总数</div></div>' +
+                '<div class="summary-card online"><div class="number">' + onlineCount + '</div><div class="label">在线</div></div>' +
+                '<div class="summary-card offline"><div class="number">' + offlineCount + '</div><div class="label">离线</div></div>';
+
+            // 渲染域名分组
+            var app = document.getElementById('app');
+            var html = '';
+            var domains = Object.keys(domainMap).sort();
+
+            for (var d = 0; d < domains.length; d++) {
+                var domainName = domains[d];
+                var urls = domainMap[domainName];
+
+                var domainOnline = 0;
+                var domainOffline = 0;
+                for (var u = 0; u < urls.length; u++) {
+                    var la = getLastAlive(urls[u].records);
+                    if (la === true) domainOnline++;
+                    else if (la === false) domainOffline++;
+                }
+
+                html += '<div class="domain-section">';
+                html += '<div class="domain-header" onclick="toggleDomain(this)">';
+                html += '<span class="domain-name">' + escapeHtml(domainName) + '</span>';
+                html += '<div class="domain-stats">';
+                if (domainOnline > 0) html += '<span class="badge badge-online">' + domainOnline + ' 在线</span>';
+                if (domainOffline > 0) html += '<span class="badge badge-offline">' + domainOffline + ' 离线</span>';
+                html += '</div>';
+                html += '</div>';
+                html += '<div class="domain-body">';
+
+                // 排序：离线的排前面
+                urls.sort(function (a, b) {
+                    var aAlive = getLastAlive(a.records);
+                    var bAlive = getLastAlive(b.records);
+                    if (aAlive === bAlive) return (a.path || '').localeCompare(b.path || '');
+                    if (aAlive === false) return -1;
+                    if (bAlive === false) return 1;
+                    return 0;
+                });
+
+                for (var u = 0; u < urls.length; u++) {
+                    var item = urls[u];
+                    var alive = getLastAlive(item.records);
+                    var statusClass = alive === true ? 'online' : (alive === false ? 'offline' : 'unknown');
+                    var lastCheck = getLastCheckTime(item.records);
+
+                    html += '<div class="url-row">';
+                    html += '<div class="url-status-dot ' + statusClass + '"></div>';
+                    html += '<div class="url-info">';
+                    html += '<div class="url-path">' + escapeHtml(item.path || '/') + '</div>';
+                    html += '<div class="url-full">' + escapeHtml(item.url) + '</div>';
+                    html += '</div>';
+                    html += '<div class="timeline-container">' + renderTimeline(item.records) + '</div>';
+                    html += '<div class="url-last-check">' + (lastCheck ? escapeHtml(lastCheck) : '-') + '</div>';
+                    html += '</div>';
+                }
+
+                html += '</div></div>';
+            }
+
+            app.innerHTML = html;
+
+            // 更新时间
+            var now = new Date();
+            document.getElementById('last-update').textContent = '页面加载时间: ' + formatDate(now);
+        }
+
+        function getLastAlive(records) {
+            if (!records || records.length === 0) return null;
+            return records[records.length - 1].alive;
+        }
+
+        function getLastCheckTime(records) {
+            if (!records || records.length === 0) return null;
+            return records[records.length - 1].check_time;
+        }
+
+        function renderTimeline(records) {
+            if (!records || records.length === 0) return '';
+
+            // 将7天划分为若干时间段，最多显示最近 48 个块（每块约3.5小时）
+            // 简化处理：取最近的记录，最多显示最近50条
+            var maxBlocks = 2016;
+            var start = Math.max(0, records.length - maxBlocks);
+            var html = '';
+
+            for (var i = start; i < records.length; i++) {
+                var r = records[i];
+                var cls = r.alive ? 'alive' : 'dead';
+                html += '<div class="timeline-block ' + cls + '">';
+                html += '<div class="tooltip">' + escapeHtml(r.check_time) + ' - ' + (r.alive ? '在线' : '离线') + '</div>';
+                html += '</div>';
+            }
+
+            return html;
+        }
+
+        function formatDate(d) {
+            var pad = function (n) {
+                return n < 10 ? '0' + n : '' + n;
+            };
+            return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+                ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+        }
+
+        // 初始加载
+        fetchStatus();
+
+        // 每60秒自动刷新
+        setInterval(fetchStatus, 60000);
+    })();
+
+    // 域名折叠/展开
+    function toggleDomain(el) {
+        var body = el.nextElementSibling;
+        if (body.style.display === 'none') {
+            body.style.display = '';
+        } else {
+            body.style.display = 'none';
+        }
+    }
+</script>
+</body>
+</html>

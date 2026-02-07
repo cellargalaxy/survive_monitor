@@ -7,6 +7,7 @@ import (
 const (
 	DefaultServerName = "survive_monitor"
 	ListenAddress     = ":4343"
+	StatusPath        = "/api/status"
 )
 
 func init() {
