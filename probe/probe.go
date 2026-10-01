@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"sync"
 	"time"
@@ -42,7 +43,8 @@ func Probe(ctx context.Context, url string, timeout time.Duration) (bool, *model
 	return true, view
 }
 
-// ParseView 从响应体里认领全局视图。它是GetView的镜像，两边的验收标准是往返恒等。不靠URL长什么样判断对端是不是本服务，只看内容能不能解出来。
+// ParseView 从响应体里认领全局视图，是GetView的镜像，两边的验收标准是往返恒等。
+// 不靠URL长什么样判断对端是不是本服务，只看内容能不能解出来；
 // 认领条件要严到不会误认：外壳是本家的响应体、业务码成功、快照非空，缺一条就当普通URL
 func ParseView(ctx context.Context, data []byte) (*model.View, bool) {
 	if len(data) == 0 {
@@ -53,7 +55,9 @@ func ParseView(ctx context.Context, data []byte) (*model.View, bool) {
 		Code int        `json:"code"`
 		Data model.View `json:"data"`
 	}
-	err := util.JsonData2Struct(data, &envelope)
+	//这里不能用util.JsonData2Struct：它解析失败会把整个响应体打到日志里，
+	//而绝大多数被探测的URL返回的本来就是网页，每轮每个URL都要刷一遍整页HTML
+	err := json.Unmarshal(data, &envelope)
 	if err != nil {
 		return nil, false
 	}
