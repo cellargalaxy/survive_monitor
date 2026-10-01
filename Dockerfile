@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.27-alpine AS builder
 ENV GOPROXY="https://goproxy.cn,direct"
 ENV GO111MODULE=on
 WORKDIR /
@@ -12,7 +12,7 @@ RUN if [ -s survive_monitor ]; then \
         CGO_ENABLED=0 GOOS=linux go build -o /survive_monitor; \
     fi
 
-FROM golang:1.24-alpine
+FROM golang:1.27-alpine
 COPY --from=builder /survive_monitor /survive_monitor
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories
 RUN apk update

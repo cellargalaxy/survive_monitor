@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>survive_monitor · 存活监听</title>
+  <!-- 空图标，免得浏览器去请求根路径的 favicon.ico，在反代前缀下那是个必然 404 -->
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      --bg: #f0f2f5;
+      --card: #ffffff;
+      --text: #1a1a1a;
+      --muted: #8a8a8a;
+      --line: #e6e8eb;
+      --online: #52c41a;
+      --offline: #f5222d;
+      --unknown: #d9d9d9;
+      --warn: #fa8c16;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16181c;
+        --card: #1f2227;
+        --text: #e8eaed;
+        --muted: #8a9099;
+        --line: #2c3038;
+        --unknown: #3a3f47;
+      }
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 16px;
+      font-size: 14px;
+    }
+
+    .head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    .head h1 { font-size: 20px; font-weight: 600; }
+    .head .meta { color: var(--muted); font-size: 12px; }
+
+    .tiles { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+    .tile {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 16px;
+      min-width: 92px;
+    }
+    .tile .num { font-size: 22px; font-weight: 700; line-height: 1.3; }
+    .tile .label { color: var(--muted); font-size: 12px; }
+
+    .group {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      margin-bottom: 14px;
+      overflow: hidden;
+    }
+    .group > .title {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .group > .title .count { color: var(--muted); font-weight: 400; font-size: 12px; }
+
+    .row { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+    .row:last-child { border-bottom: none; }
+    .row .line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--unknown); }
+    .dot.online { background: var(--online); }
+    .dot.offline { background: var(--offline); }
+
+    .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+    .tag {
+      font-size: 11px;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 0 5px;
+      line-height: 17px;
+    }
+    .tag.instance { color: var(--online); border-color: var(--online); }
+    .tag.alarm { color: var(--offline); border-color: var(--offline); }
+
+    .bar { display: flex; gap: 1px; margin-top: 8px; height: 18px; align-items: stretch; }
+    .bar i { flex: 1; background: var(--unknown); border-radius: 1px; min-width: 1px; }
+    .bar i.online { background: var(--online); }
+    .bar i.offline { background: var(--offline); }
+    .bar-axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 3px; }
+
+    .res { margin-top: 8px; display: flex; gap: 14px; flex-wrap: wrap; }
+    .res .item { min-width: 140px; flex: 1; }
+    .res .item .cap { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+    .res .item .cap b { color: var(--text); font-weight: 600; }
+    .res .item .track { height: 6px; border-radius: 3px; background: var(--unknown); margin-top: 4px; overflow: hidden; }
+    .res .item .track span { display: block; height: 100%; background: var(--online); }
+    .res .item .track span.warn { background: var(--warn); }
+    .res .item .track span.over { background: var(--offline); }
+
+    .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  </style>
+</head>
+<body>
+<div class="head">
+  <h1>存活监听</h1>
+  <span class="meta" id="meta">加载中</span>
+</div>
+
+<div class="tiles" id="tiles"></div>
+<div id="body"><div class="empty">加载中</div></div>
+
+<script>
+  var REFRESH_MS = 30000;
+  var SLOT_COUNT = 96;
+
+  // 看板和接口挂在同一个服务上，所以按当前页面路径回推接口前缀，反代挂了子路径也能用
+  function apiUrl(name) {
+    var path = location.pathname;
+    var index = path.indexOf('/static/');
+    var prefix = index >= 0 ? path.slice(0, index) : path.replace(/\/[^/]*$/, '');
+    return prefix + '/api/' + name;
+  }
+
+  function parseUrl(raw) {
+    try {
+      var object = new URL(raw);
+      return {domain: object.protocol + '//' + object.host, path: (object.pathname || '/') + (object.search || '')};
+    } catch (err) {
+      return {domain: raw, path: '/'};
+    }
+  }
+
+  function formatSize(byte) {
+    if (!byte) return '0B';
+    var units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    var index = 0;
+    var value = byte;
+    while (value >= 1024 && index < units.length - 1) {
+      value = value / 1024;
+      index++;
+    }
+    return value.toFixed(value >= 100 || index === 0 ? 0 : 1) + units[index];
+  }
+
+  function formatTime(second) {
+    if (!second) return '-';
+    var date = new Date(second * 1000);
+    var pad = function (value) { return value < 10 ? '0' + value : '' + value; };
+    return pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+  }
+
+  function formatDuration(second) {
+    if (second < 60) return second + '秒';
+    if (second < 3600) return Math.floor(second / 60) + '分钟';
+    if (second < 86400) return Math.floor(second / 3600) + '小时';
+    return Math.floor(second / 86400) + '天';
+  }
+
+  // 判定口径要和后端一致：离线要全部有结论的实例都说离线，在线只要有一个说在线
+  function judge(snapshots, url) {
+    var count = 0;
+    var online = false;
+    for (var key in snapshots) {
+      var probes = snapshots[key].probes;
+      if (!probes || !(url in probes)) continue;
+      count++;
+      if (probes[url]) online = true;
+    }
+    if (count === 0) return {state: 'unknown', count: 0};
+    return {state: online ? 'online' : 'offline', count: count};
+  }
+
+  function buildSlots(records, windowSec) {
+    var slots = new Array(SLOT_COUNT);
+    for (var i = 0; i < SLOT_COUNT; i++) slots[i] = null;
+    if (!records || !records.length) return slots;
+
+    var end = Math.floor(Date.now() / 1000);
+    var begin = end - windowSec;
+    var span = windowSec / SLOT_COUNT;
+    for (var r = 0; r < records.length; r++) {
+      var record = records[r];
+      if (record.time < begin) continue;
+      var index = Math.floor((record.time - begin) / span);
+      if (index < 0) index = 0;
+      if (index >= SLOT_COUNT) index = SLOT_COUNT - 1;
+      // 一个槽里只要有一次失败就标失败，宁可显眼也不要把抖动藏起来
+      if (slots[index] === false) continue;
+      slots[index] = !!record.alive;
+    }
+    return slots;
+  }
+
+  function resourceItem(name, used, total, percent) {
+    var cls = percent >= 90 ? 'over' : (percent >= 70 ? 'warn' : '');
+    var detail = total ? formatSize(used) + ' / ' + formatSize(total) : percent.toFixed(1) + '%';
+    return '<div class="item"><div class="cap"><span>' + name + '</span><b>' + detail + '</b></div>'
+      + '<div class="track"><span class="' + cls + '" style="width:' + Math.min(100, percent).toFixed(1) + '%"></span></div></div>';
+  }
+
+  function resourceHtml(resource) {
+    if (!resource || !resource.time) return '';
+    var cpuPercent = resource.cpu_num > 0 ? resource.cpu_usage / resource.cpu_num : 0;
+    var memPercent = resource.mem_total > 0 ? resource.mem_used / resource.mem_total * 100 : 0;
+    var diskPercent = resource.disk_total > 0 ? resource.disk_used / resource.disk_total * 100 : 0;
+    var cpuCls = cpuPercent >= 90 ? 'over' : (cpuPercent >= 70 ? 'warn' : '');
+    var cpuHtml = '<div class="item"><div class="cap"><span>CPU · ' + resource.cpu_num + '核</span><b>' + cpuPercent.toFixed(1) + '%</b></div>'
+      + '<div class="track"><span class="' + cpuCls + '" style="width:' + Math.min(100, cpuPercent).toFixed(1) + '%"></span></div></div>';
+    return '<div class="res">' + cpuHtml
+      + resourceItem('内存', resource.mem_used, resource.mem_total, memPercent)
+      + resourceItem('磁盘', resource.disk_used, resource.disk_total, diskPercent)
+      + '</div>';
+  }
+
+  function render(status) {
+    var snapshots = (status.view && status.view.snapshots) || {};
+    var records = status.records || {};
+    var now = Math.floor(Date.now() / 1000);
+
+    // 探测过的URL取自各实例的结论并集，这样对端探了而自己还没探的URL也看得到
+    var urlSet = {};
+    for (var key in snapshots) {
+      var probes = snapshots[key].probes || {};
+      for (var url in probes) urlSet[url] = true;
+    }
+    for (var url2 in records) urlSet[url2] = true;
+
+    // 实例URL不另行配置，谁的响应被解析出过快照，它就是实例；这里反过来按身份键认出来
+    var instanceSet = {};
+    for (var source in snapshots) {
+      if (source) instanceSet[source] = snapshots[source];
+    }
+
+    var urls = Object.keys(urlSet).sort();
+    if (!urls.length) {
+      document.getElementById('tiles').innerHTML = '';
+      document.getElementById('body').innerHTML = '<div class="empty">还没有数据，等第一轮探测跑完</div>';
+      return;
+    }
+
+    var online = 0, offline = 0, unknown = 0;
+    var groups = {};
+    for (var i = 0; i < urls.length; i++) {
+      var item = urls[i];
+      var result = judge(snapshots, item);
+      if (result.state === 'online') online++;
+      else if (result.state === 'offline') offline++;
+      else unknown++;
+
+      var parsed = parseUrl(item);
+      if (!groups[parsed.domain]) groups[parsed.domain] = [];
+      groups[parsed.domain].push({url: item, path: parsed.path, result: result});
+    }
+
+    var instanceCount = Object.keys(instanceSet).length;
+    document.getElementById('tiles').innerHTML =
+      '<div class="tile"><div class="num">' + urls.length + '</div><div class="label">探测URL</div></div>'
+      + '<div class="tile"><div class="num" style="color:var(--online)">' + online + '</div><div class="label">在线</div></div>'
+      + '<div class="tile"><div class="num" style="color:var(--offline)">' + offline + '</div><div class="label">离线</div></div>'
+      + '<div class="tile"><div class="num" style="color:var(--muted)">' + unknown + '</div><div class="label">无结论</div></div>'
+      + '<div class="tile"><div class="num">' + (instanceCount + 1) + '</div><div class="label">实例</div></div>';
+
+    var windowSec = 86400;
+    var html = '';
+    var domains = Object.keys(groups).sort();
+    for (var d = 0; d < domains.length; d++) {
+      var domain = domains[d];
+      var list = groups[domain];
+      html += '<div class="group"><div class="title">' + domain + '<span class="count">' + list.length + '个URL</span></div>';
+      for (var j = 0; j < list.length; j++) {
+        var row = list[j];
+        var snapshot = instanceSet[row.url];
+        var tags = '';
+        if (snapshot) {
+          tags += '<span class="tag instance">实例</span>';
+          if (snapshot.time) tags += '<span class="tag">交换于 ' + formatTime(snapshot.time) + '</span>';
+        }
+        if (row.result.count) tags += '<span class="tag">' + row.result.count + '个实例结论</span>';
+
+        var alarm = null;
+        for (var sourceKey in snapshots) {
+          var alarms = snapshots[sourceKey].alarms || {};
+          if (alarms[row.url] && (!alarm || alarms[row.url].last_send_time > alarm.last_send_time)) alarm = alarms[row.url];
+        }
+        if (alarm) tags += '<span class="tag alarm">已告警 · 离线' + formatDuration(now - alarm.start_time) + '</span>';
+
+        var slots = buildSlots(records[row.url], windowSec);
+        var bar = '';
+        for (var s = 0; s < slots.length; s++) {
+          bar += '<i class="' + (slots[s] === true ? 'online' : (slots[s] === false ? 'offline' : '')) + '"></i>';
+        }
+
+        html += '<div class="row"><div class="line"><span class="dot ' + row.result.state + '"></span>'
+          + '<span class="path">' + row.path + '</span>' + tags + '</div>'
+          + '<div class="bar">' + bar + '</div>'
+          + '<div class="bar-axis"><span>' + formatDuration(windowSec) + '前</span><span>现在</span></div>'
+          + (snapshot ? resourceHtml(snapshot.resource) : '')
+          + '</div>';
+      }
+      html += '</div>';
+    }
+
+    // 自己那条的身份键是空的，没有对应的URL可挂，单独列出来
+    if (snapshots['']) {
+      html += '<div class="group"><div class="title">本实例<span class="count">自己的观测与资源</span></div>'
+        + '<div class="row"><div class="line"><span class="dot online"></span><span class="path">' + (snapshots[''].id || '-') + '</span>'
+        + '<span class="tag">采集于 ' + formatTime(snapshots[''].time) + '</span></div>'
+        + resourceHtml(snapshots[''].resource) + '</div></div>';
+    }
+
+    document.getElementById('body').innerHTML = html;
+  }
+
+  function flush() {
+    fetch(apiUrl('status'), {cache: 'no-store'}).then(function (response) {
+      return response.json();
+    }).then(function (body) {
+      if (!body || body.code !== 200 || !body.data) throw new Error(body && body.msg ? body.msg : '响应异常');
+      document.getElementById('meta').textContent = '更新于 ' + new Date().toLocaleTimeString();
+      render(body.data);
+    }).catch(function (err) {
+      document.getElementById('meta').textContent = '拉取失败：' + err.message;
+    });
+  }
+
+  flush();
+  setInterval(flush, REFRESH_MS);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) flush();
+  });
+</script>
+</body>
+</html>
