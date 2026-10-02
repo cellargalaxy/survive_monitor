@@ -13,16 +13,16 @@ const (
 )
 
 const (
-	probeIntervalSec  = 2     //探测间隔：2秒，每个URL之后、每轮末尾各休眠一次
-	probeTimeoutSec   = 5     //单次探测超时：5秒
-	offlineRound      = 3     //连续3轮失败才判离线
-	snapshotExpireSec = 300   //快照过期：5分钟
-	recordWindowSec   = 86400 //看板明细保留：1天
-	diskPath          = "/"   //磁盘采集路径
-	cpuUsageLimit     = 90    //CPU使用率告警阈值：90%
-	memUsageLimit     = 90    //内存使用率告警阈值：90%
-	diskUsageLimit    = 90    //磁盘使用率告警阈值：90%
-	resourceRound     = 3     //资源连续3轮超阈值才告警
+	probeIntervalSec  = 2      //探测间隔：2秒，每个URL之后、每轮末尾各休眠一次
+	probeTimeoutSec   = 5      //单次探测超时：5秒
+	offlineRound      = 3      //连续3轮失败才判离线
+	snapshotExpireSec = 300    //快照过期：5分钟
+	recordWindowSec   = 604800 //看板明细保留：7天
+	diskPath          = "/"    //磁盘采集路径
+	cpuUsageLimit     = 90     //CPU使用率告警阈值：90%
+	memUsageLimit     = 90     //内存使用率告警阈值：90%
+	diskUsageLimit    = 90     //磁盘使用率告警阈值：90%
+	resourceRound     = 3      //资源连续3轮超阈值才告警
 )
 
 // alarmBackoffSec 告警退避阶梯：首发之后5分钟、30分钟、2小时，之后保持2小时
