@@ -2,7 +2,6 @@ package corn
 
 import (
 	"context"
-	"time"
 
 	"github.com/cellargalaxy/go_common/util"
 	"github.com/cellargalaxy/survive_monitor/config"
@@ -10,16 +9,17 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Init 启动监听轮次。用守护单协程池而不是cron：池子是单协程的，任务跑完才休眠再投下一轮，
-// 「上一轮没结束就不开新一轮」是白送的。cron按点硬触发，赶上一轮探测跑超时，轮次就会叠起来
+// Init 启动监听轮次。用守护单协程池而不是cron：池子是单协程的，任务跑完才投下一轮，
+// 「上一轮没结束就不开新一轮」是白送的。cron按点硬触发，赶上一轮探测跑超时，轮次就会叠起来。
+// 池子自己的休眠设为0，节奏全交给service.Monitor：每个URL之后、每轮末尾各休眠probe_interval_sec，
+// 这样间隔每轮现读配置，改完不用重启
 func Init(ctx context.Context) error {
-	interval := time.Duration(config.GetConfig(ctx).ProbeIntervalSec) * time.Second
-	_, err := util.NewDaemonSingleGoPool(ctx, "Monitor", interval, monitor)
+	_, err := util.NewDaemonSingleGoPool(ctx, "Monitor", 0, monitor)
 	if err != nil {
 		return err
 	}
 
-	logrus.WithContext(ctx).WithFields(logrus.Fields{"interval": interval}).Info("定时任务，监听服务")
+	logrus.WithContext(ctx).WithFields(logrus.Fields{"interval": config.GetConfig(ctx).ProbeIntervalSec}).Info("定时任务，监听服务")
 	return nil
 }
 

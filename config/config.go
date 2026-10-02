@@ -13,7 +13,7 @@ const (
 )
 
 const (
-	probeIntervalSec  = 60    //探测间隔：1分钟
+	probeIntervalSec  = 2     //探测间隔：2秒，每个URL之后、每轮末尾各休眠一次
 	probeTimeoutSec   = 5     //单次探测超时：5秒
 	offlineRound      = 3     //连续3轮失败才判离线
 	snapshotExpireSec = 300   //快照过期：5分钟
@@ -66,9 +66,9 @@ func (this *ConfigHandler) Parse(ctx context.Context, text string) (model.Config
 	if len(config.Urls) == 0 {
 		logrus.WithContext(ctx).WithFields(logrus.Fields{}).Warn("加载配置，URL列表为空")
 	}
-	//单轮不设预算，串行探测最坏耗时是URL数×单次超时，两次落快照最多相隔「探测间隔+最坏耗时」。
+	//单轮不设预算，两次落快照最多相隔「URL数×(单次超时+探测间隔) + 轮末探测间隔」。
 	//这段间隔一旦超过快照过期时长，对端会在两轮之间把本实例当成过期，判定分母里就少了本实例这一票
-	if worstSec := config.ProbeIntervalSec + len(config.Urls)*config.ProbeTimeoutSec; worstSec >= config.SnapshotExpireSec {
+	if worstSec := len(config.Urls)*(config.ProbeTimeoutSec+config.ProbeIntervalSec) + config.ProbeIntervalSec; worstSec >= config.SnapshotExpireSec {
 		logrus.WithContext(ctx).WithFields(logrus.Fields{"url": len(config.Urls), "timeout": config.ProbeTimeoutSec, "interval": config.ProbeIntervalSec, "worst": worstSec, "expire": config.SnapshotExpireSec}).Warn("加载配置，最坏轮次间隔不短于快照过期时长")
 	}
 	logrus.WithContext(ctx).WithFields(logrus.Fields{"config": config}).Info("加载配置")

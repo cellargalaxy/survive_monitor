@@ -12,7 +12,7 @@ func init() {
 
 type Config struct {
 	Urls              []string `json:"urls" yaml:"urls"`                               //探测的URL列表，所有实例共用同一份
-	ProbeIntervalSec  int      `json:"probe_interval_sec" yaml:"probe_interval_sec"`   //探测间隔，秒；服务启动时读一次，改完要重启
+	ProbeIntervalSec  int      `json:"probe_interval_sec" yaml:"probe_interval_sec"`   //探测间隔，秒；每探完一个URL、每轮采完资源之后各休眠这么久，每轮现读，改完不用重启
 	ProbeTimeoutSec   int      `json:"probe_timeout_sec" yaml:"probe_timeout_sec"`     //单次探测超时，秒
 	OfflineRound      int      `json:"offline_round" yaml:"offline_round"`             //连续失败多少轮，本实例才判定该URL离线
 	SnapshotExpireSec int      `json:"snapshot_expire_sec" yaml:"snapshot_expire_sec"` //快照过期时长，秒；过期的不参与判定

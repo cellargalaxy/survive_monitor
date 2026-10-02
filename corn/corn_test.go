@@ -17,7 +17,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// 间隔是零的话守护池会退化成空转，服务看着活着却一轮都不跑，所以这条得钉住
+// 守护池自己的休眠是0，节奏全靠探测间隔：间隔是零的话一轮接一轮地空转，所以这条得钉住
 func TestInit(t *testing.T) {
 	ctx := util.GenCtx()
 	if interval := config.GetConfig(ctx).ProbeIntervalSec; interval <= 0 {

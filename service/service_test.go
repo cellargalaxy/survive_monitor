@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -122,6 +123,62 @@ func TestProbeUrlsTimeout(t *testing.T) {
 		if probes[url] {
 			t.Errorf("超时的URL该记失败: %s", url)
 		}
+	}
+}
+
+// 每探完一个URL都要休眠探测间隔，最后一个之后也睡：A 休眠 B 休眠 C 休眠
+func TestProbeUrlsInterval(t *testing.T) {
+	var lock sync.Mutex
+	var times []time.Time
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		lock.Lock()
+		defer lock.Unlock()
+		times = append(times, time.Now())
+	}))
+	defer server.Close()
+
+	conf := model.Config{ProbeIntervalSec: 1, ProbeTimeoutSec: 3, RecordWindowSec: 600, OfflineRound: 1}
+	for i := 0; i < 3; i++ {
+		conf.Urls = append(conf.Urls, fmt.Sprintf("%s/interval/%d", server.URL, i))
+	}
+	begin := time.Now()
+	probeUrls(util.GenCtx(), conf)
+	cost := time.Since(begin)
+
+	if len(times) != 3 {
+		t.Fatalf("期望收到 3 次请求，实际 %d 次", len(times))
+	}
+	for i := 1; i < len(times); i++ {
+		if gap := times[i].Sub(times[i-1]); gap < time.Second {
+			t.Errorf("第 %d 和第 %d 个URL之间应至少隔1秒，实际 %v", i, i+1, gap)
+		}
+	}
+	if cost < 3*time.Second || cost > 4*time.Second {
+		t.Errorf("3个URL各休眠1秒，最后一个之后也要睡，整轮该在3秒出头，实际 %v", cost)
+	}
+}
+
+// 没有URL时一轮只剩资源采集加轮末休眠：资源采集 休眠 资源采集 ...
+func TestMonitorSleep(t *testing.T) {
+	conf := model.Config{
+		ProbeIntervalSec:  1,
+		ProbeTimeoutSec:   3,
+		OfflineRound:      3,
+		SnapshotExpireSec: 300,
+		RecordWindowSec:   600,
+		DiskPath:          "/",
+		CpuUsageLimit:     1000,
+		MemUsageLimit:     1000,
+		DiskUsageLimit:    1000,
+		ResourceRound:     3,
+	}
+	begin := time.Now()
+	monitor(util.GenCtx(), conf)
+	cost := time.Since(begin)
+
+	//CPU采样固定1秒，加上轮末休眠1秒
+	if cost < 2*time.Second || cost > 3*time.Second {
+		t.Errorf("一轮应是CPU采样1秒+轮末休眠1秒，实际 %v", cost)
 	}
 }
 
