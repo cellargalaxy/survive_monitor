@@ -63,3 +63,38 @@ func TestProbeUrls(t *testing.T) {
 		t.Errorf("连不上的URL该收敛成离线")
 	}
 }
+
+// URL列表为空时探测无事可做，但本机资源照样要采、要落进自己的快照，看板和资源告警才不会断
+func TestMonitorEmptyUrls(t *testing.T) {
+	conf := model.Config{
+		ProbeBudgetSec:    10,
+		ProbeTimeoutSec:   3,
+		ProbeConcurrency:  4,
+		OfflineRound:      3,
+		SnapshotExpireSec: 300,
+		RecordWindowSec:   600,
+		DiskPath:          "/",
+		//阈值拉满，保证这一轮不会真的去发告警
+		CpuUsageLimit:  1000,
+		MemUsageLimit:  1000,
+		DiskUsageLimit: 1000,
+		ResourceRound:  3,
+	}
+
+	ctx := util.GenCtx()
+	monitor(ctx, conf)
+
+	self, ok := view.GetView(ctx, conf.SnapshotExpireSec).Snapshots[model.SelfSource]
+	if !ok {
+		t.Fatalf("URL列表为空也该落下自己的快照")
+	}
+	if self.Resource == nil || self.Resource.Time <= 0 {
+		t.Fatalf("URL列表为空也该采到本机资源，实际: %+v", self.Resource)
+	}
+	if self.Resource.CpuNum <= 0 || self.Resource.MemTotal == 0 || self.Resource.DiskTotal == 0 {
+		t.Errorf("本机资源取值非法: %+v", *self.Resource)
+	}
+	if len(self.Probes) != 0 {
+		t.Errorf("没有URL就不该有探测结论，实际: %+v", self.Probes)
+	}
+}

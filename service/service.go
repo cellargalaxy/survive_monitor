@@ -16,10 +16,13 @@ import (
 
 // Monitor 跑一轮监听：并发探测 -> 落明细 -> 收敛本实例结论 -> 采集本机资源 -> 合并对端视图 -> 判定 -> 告警
 func Monitor(ctx context.Context) {
-	conf := config.GetConfig(ctx)
+	monitor(ctx, config.GetConfig(ctx))
+}
+
+func monitor(ctx context.Context, conf model.Config) {
+	//URL列表为空也照常走完一轮：资源采集和资源告警不依赖URL，探测、合并、URL告警那几步遍历空列表自然什么都不做
 	if len(conf.Urls) == 0 {
-		logrus.WithContext(ctx).WithFields(logrus.Fields{}).Warn("监听一轮，URL列表为空")
-		return
+		logrus.WithContext(ctx).WithFields(logrus.Fields{}).Warn("监听一轮，URL列表为空，只采集本机资源")
 	}
 
 	//单轮预算一到就掐断，没跑完的URL本轮按失败计。预算不设的话失败URL会把一轮拖到比间隔还长，轮次就堆起来了
