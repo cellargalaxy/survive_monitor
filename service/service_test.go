@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -38,7 +37,6 @@ func TestProbeUrls(t *testing.T) {
 
 	conf := model.Config{
 		Urls:            []string{peer.URL, plain.URL, deadUrl},
-		ProbeBudgetSec:  10,
 		ProbeTimeoutSec: 3,
 		RecordWindowSec: 600,
 		OfflineRound:    1,
@@ -82,7 +80,7 @@ func TestProbeUrlsSerial(t *testing.T) {
 	}))
 	defer server.Close()
 
-	conf := model.Config{ProbeBudgetSec: 10, ProbeTimeoutSec: 3, RecordWindowSec: 600, OfflineRound: 1}
+	conf := model.Config{ProbeTimeoutSec: 3, RecordWindowSec: 600, OfflineRound: 1}
 	for i := 0; i < 5; i++ {
 		conf.Urls = append(conf.Urls, fmt.Sprintf("%s/serial/%d", server.URL, i))
 	}
@@ -93,36 +91,36 @@ func TestProbeUrlsSerial(t *testing.T) {
 	}
 }
 
-// 预算用完时，正在探的那个被掐断记失败，还没轮到的不再发请求、直接记失败
-func TestProbeUrlsBudget(t *testing.T) {
+// 单轮不设预算：前面的URL再慢，后面的也要实打实探一次，每个URL只受单次超时约束
+func TestProbeUrlsTimeout(t *testing.T) {
 	var count atomic.Int32
 	slow := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		count.Add(1)
-		time.Sleep(2 * time.Second)
+		time.Sleep(1500 * time.Millisecond)
 	}))
 	defer slow.Close()
 
 	conf := model.Config{
-		Urls:            []string{slow.URL + "/budget/0", slow.URL + "/budget/1"},
-		ProbeTimeoutSec: 3,
+		Urls:            []string{slow.URL + "/timeout/0", slow.URL + "/timeout/1"},
+		ProbeTimeoutSec: 1,
 		RecordWindowSec: 600,
 		OfflineRound:    1,
 	}
-	ctx, cancel := context.WithTimeout(util.GenCtx(), time.Second)
-	defer cancel()
+	ctx := util.GenCtx()
 	begin := time.Now()
 	probeUrls(ctx, conf)
+	cost := time.Since(begin)
 
-	if cost := time.Since(begin); cost > 1500*time.Millisecond {
-		t.Errorf("预算1秒，整轮不该拖到 %v", cost)
+	if count.Load() != 2 {
+		t.Errorf("每个URL都该发出请求，期望服务端收到 2 次，实际 %d 次", count.Load())
 	}
-	if count.Load() != 1 {
-		t.Errorf("预算用完后不该再发请求，期望服务端只收到 1 次，实际 %d 次", count.Load())
+	if cost < 2*time.Second || cost > 2500*time.Millisecond {
+		t.Errorf("两个URL各被单次超时1秒掐断，整轮该在2秒左右，实际 %v", cost)
 	}
-	probes := view.Converge(util.GenCtx(), conf.Urls, conf.OfflineRound)
+	probes := view.Converge(ctx, conf.Urls, conf.OfflineRound)
 	for _, url := range conf.Urls {
 		if probes[url] {
-			t.Errorf("超预算的URL该记失败: %s", url)
+			t.Errorf("超时的URL该记失败: %s", url)
 		}
 	}
 }
@@ -130,7 +128,6 @@ func TestProbeUrlsBudget(t *testing.T) {
 // URL列表为空时探测无事可做，但本机资源照样要采、要落进自己的快照，看板和资源告警才不会断
 func TestMonitorEmptyUrls(t *testing.T) {
 	conf := model.Config{
-		ProbeBudgetSec:    10,
 		ProbeTimeoutSec:   3,
 		OfflineRound:      3,
 		SnapshotExpireSec: 300,

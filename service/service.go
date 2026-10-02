@@ -24,11 +24,7 @@ func monitor(ctx context.Context, conf model.Config) {
 		logrus.WithContext(ctx).WithFields(logrus.Fields{}).Warn("监听一轮，URL列表为空，只采集本机资源")
 	}
 
-	//单轮预算一到就掐断，没跑完的URL本轮按失败计。预算不设的话失败URL会把一轮拖到比间隔还长，轮次就堆起来了
-	budgetCtx, cancel := context.WithTimeout(ctx, time.Duration(conf.ProbeBudgetSec)*time.Second)
-	defer util.CancelCtx(cancel)
-
-	views := probeUrls(budgetCtx, conf)
+	views := probeUrls(ctx, conf)
 	probes := view.Converge(ctx, conf.Urls, conf.OfflineRound)
 
 	resource, err := machine.LoadResource(ctx, conf.DiskPath)
@@ -46,19 +42,15 @@ func monitor(ctx context.Context, conf model.Config) {
 	view.Clean(ctx, conf.SnapshotExpireSec, conf.RecordWindowSec)
 }
 
-// probeUrls 在预算内逐个串行探测全部URL，落下明细，并把解析到全局视图的那些按来源URL收集起来。
-// 串行是为了不给本机和被探测的服务添压力，代价是单轮耗时随URL数量线性增长，最坏是URL数×单次超时
+// probeUrls 逐个串行探测全部URL，落下明细，并把解析到全局视图的那些按来源URL收集起来。
+// 串行是为了不给本机和被探测的服务添压力；单轮不设总预算，每个URL都实打实探一次，只靠单次超时兜底，
+// 代价是单轮耗时随URL数量线性增长，最坏是URL数×单次超时。轮次不会叠加，守护池是跑完一轮才休眠再投下一轮
 func probeUrls(ctx context.Context, conf model.Config) map[string]*model.View {
 	timeout := time.Duration(conf.ProbeTimeoutSec) * time.Second
 	views := make(map[string]*model.View)
 
 	for i := range conf.Urls {
 		url := conf.Urls[i]
-		//预算用完还没轮到的，本轮就按失败计，不必再白跑一次必然超时的请求
-		if util.CtxDone(ctx) {
-			view.SaveRecord(ctx, url, false, conf.RecordWindowSec)
-			continue
-		}
 		alive, peer := probeUrl(ctx, url, timeout)
 		view.SaveRecord(ctx, url, alive, conf.RecordWindowSec)
 		if peer != nil {

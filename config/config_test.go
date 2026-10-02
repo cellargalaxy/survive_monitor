@@ -24,9 +24,6 @@ func TestGetConfigDefault(t *testing.T) {
 	if conf.ProbeIntervalSec != probeIntervalSec {
 		t.Errorf("探测间隔期望 %d，实际 %d", probeIntervalSec, conf.ProbeIntervalSec)
 	}
-	if conf.ProbeBudgetSec != probeBudgetSec {
-		t.Errorf("单轮预算期望 %d，实际 %d", probeBudgetSec, conf.ProbeBudgetSec)
-	}
 	if conf.ProbeTimeoutSec != probeTimeoutSec {
 		t.Errorf("单次超时期望 %d，实际 %d", probeTimeoutSec, conf.ProbeTimeoutSec)
 	}
@@ -38,11 +35,6 @@ func TestGetConfigDefault(t *testing.T) {
 	}
 	if len(conf.AlarmBackoffSec) != len(alarmBackoffSec) {
 		t.Errorf("退避阶梯期望 %d 阶，实际 %d 阶", len(alarmBackoffSec), len(conf.AlarmBackoffSec))
-	}
-
-	//单轮预算必须短于探测间隔，否则一轮没跑完下一轮就该发车了
-	if conf.ProbeBudgetSec >= conf.ProbeIntervalSec {
-		t.Errorf("单轮预算 %d 不该不短于探测间隔 %d", conf.ProbeBudgetSec, conf.ProbeIntervalSec)
 	}
 }
 
