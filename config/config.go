@@ -13,16 +13,16 @@ const (
 )
 
 const (
-	probeIntervalSec  = 2      //探测间隔：2秒，每个URL之后、每轮末尾各休眠一次
-	probeTimeoutSec   = 5      //单次探测超时：5秒
-	offlineRound      = 3      //连续3轮失败才判离线
-	snapshotExpireSec = 300    //快照过期：5分钟
-	recordWindowSec   = 604800 //看板明细保留：7天
-	diskPath          = "/"    //磁盘采集路径
-	cpuUsageLimit     = 90     //CPU使用率告警阈值：90%
-	memUsageLimit     = 90     //内存使用率告警阈值：90%
-	diskUsageLimit    = 90     //磁盘使用率告警阈值：90%
-	resourceRound     = 3      //资源连续3轮超阈值才告警
+	probeIntervalSec    = 2      //探测间隔：2秒，每个URL之后、每轮末尾各休眠一次
+	probeTimeoutSec     = 5      //单次探测超时：5秒
+	offlineRound        = 3      //连续3轮失败才判离线
+	snapshotExpireRound = 5      //快照过期：连续5轮拿不到新数据
+	recordWindowSec     = 604800 //看板明细保留：7天
+	diskPath            = "/"    //磁盘采集路径
+	cpuUsageLimit       = 90     //CPU使用率告警阈值：90%
+	memUsageLimit       = 90     //内存使用率告警阈值：90%
+	diskUsageLimit      = 90     //磁盘使用率告警阈值：90%
+	resourceRound       = 3      //资源连续3轮超阈值才告警
 )
 
 // alarmBackoffSec 告警退避阶梯：首发之后5分钟、30分钟、2小时，之后保持2小时
@@ -66,11 +66,6 @@ func (this *ConfigHandler) Parse(ctx context.Context, text string) (model.Config
 	if len(config.Urls) == 0 {
 		logrus.WithContext(ctx).WithFields(logrus.Fields{}).Warn("加载配置，URL列表为空")
 	}
-	//单轮不设预算，两次落快照最多相隔「URL数×(单次超时+探测间隔) + 轮末探测间隔」。
-	//这段间隔一旦超过快照过期时长，对端会在两轮之间把本实例当成过期，判定分母里就少了本实例这一票
-	if worstSec := len(config.Urls)*(config.ProbeTimeoutSec+config.ProbeIntervalSec) + config.ProbeIntervalSec; worstSec >= config.SnapshotExpireSec {
-		logrus.WithContext(ctx).WithFields(logrus.Fields{"url": len(config.Urls), "timeout": config.ProbeTimeoutSec, "interval": config.ProbeIntervalSec, "worst": worstSec, "expire": config.SnapshotExpireSec}).Warn("加载配置，最坏轮次间隔不短于快照过期时长")
-	}
 	logrus.WithContext(ctx).WithFields(logrus.Fields{"config": config}).Info("加载配置")
 	return config, nil
 }
@@ -85,8 +80,8 @@ func fillConfig(config *model.Config) {
 	if config.OfflineRound <= 0 {
 		config.OfflineRound = offlineRound
 	}
-	if config.SnapshotExpireSec <= 0 {
-		config.SnapshotExpireSec = snapshotExpireSec
+	if config.SnapshotExpireRound <= 0 {
+		config.SnapshotExpireRound = snapshotExpireRound
 	}
 	if config.RecordWindowSec <= 0 {
 		config.RecordWindowSec = recordWindowSec

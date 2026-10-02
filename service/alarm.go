@@ -53,9 +53,9 @@ func judgeAlarm(ctx context.Context, conf model.Config, now int64) ([]string, []
 
 	for i := range conf.Urls {
 		url := conf.Urls[i]
-		offline, online, count := view.Judge(ctx, url, conf.SnapshotExpireSec)
+		offline, online, count := view.Judge(ctx, url, conf.SnapshotExpireRound)
 		//记录是全局的，对端已经发过就轮不到自己再发一遍
-		alarm, exist := view.GetAlarm(ctx, url, conf.SnapshotExpireSec)
+		alarm, exist := view.GetAlarm(ctx, url, conf.SnapshotExpireRound)
 
 		if offline {
 			if exist && now-alarm.LastSendTime < int64(getBackoff(conf.AlarmBackoffSec, alarm.SendCount)) {

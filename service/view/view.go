@@ -16,6 +16,13 @@ var lock = &sync.RWMutex{}
 var selfId = util.GenStrId()
 var selfSnapshot = model.Snapshot{Id: selfId, Source: model.SelfSource}
 var peerSnapshots = make(map[string]model.Snapshot)
+
+// peerRounds 身份键 -> 最近一次拿到新数据时是本实例的第几轮。过期按轮数算：之后连续若干轮都没拿到更新的快照就算过期。
+// 「新数据」只认原始产生时间更新的快照，单纯又拉到一份同样的旧快照不算，否则实例之间来回转发一份挂掉实例的旧快照能把它永远续命
+var peerRounds = make(map[string]int64)
+
+// round 本实例当前是第几轮，每轮开头由NextRound加一
+var round int64
 var records = make(map[string][]model.Record)
 var resourceOverRound int
 
@@ -56,32 +63,40 @@ func SaveSelf(ctx context.Context, probes map[string]bool, resource *model.Resou
 	selfSnapshot.Resource = resource
 }
 
+// NextRound 开始新的一轮，快照过期的轮数就按它数
+func NextRound(ctx context.Context) {
+	lock.Lock()
+	defer lock.Unlock()
+
+	round++
+}
+
 // Merge 合并从source拿到的对端视图。身份键为空的那条就是对端自己，回填成source；
 // 其余条目是对端转发的二手数据，原样保留它们的身份键与产生时间
 func Merge(ctx context.Context, source string, view model.View) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	merge(ctx, peerSnapshots, selfId, source, view)
+	merge(ctx, peerSnapshots, peerRounds, round, selfId, source, view)
 }
 
 // Judge 判定某个URL。offline要全部有新鲜结论的实例一致说离线，online只要任一实例说在线，
 // count是给出了结论的实例数，也就是判定的分母。两边都为false说明没有任何新鲜结论可依据，保持现状、不告警
-func Judge(ctx context.Context, url string, expireSec int) (bool, bool, int) {
+func Judge(ctx context.Context, url string, expireRound int) (bool, bool, int) {
 	lock.RLock()
 	defer lock.RUnlock()
 
-	return judge(snapshotList(expireSec, time.Now().Unix()), url)
+	return judge(snapshotList(expireRound), url)
 }
 
 // GetAlarm 取全局最新的离线告警记录。自己的和对端的一起看，对端已经发过就轮不到自己再发
-func GetAlarm(ctx context.Context, url string, expireSec int) (model.Alarm, bool) {
+func GetAlarm(ctx context.Context, url string, expireRound int) (model.Alarm, bool) {
 	lock.RLock()
 	defer lock.RUnlock()
 
 	var newest model.Alarm
 	var exist bool
-	for _, snapshot := range snapshotList(expireSec, time.Now().Unix()) {
+	for _, snapshot := range snapshotList(expireRound) {
 		alarm, ok := snapshot.Alarms[url]
 		if !ok {
 			continue
@@ -150,15 +165,15 @@ func MarkResourceOver(ctx context.Context, over bool) int {
 }
 
 // GetView 组装交换载荷。自己那条的身份键要留空，交给接收方回填
-func GetView(ctx context.Context, expireSec int) model.View {
+func GetView(ctx context.Context, expireRound int) model.View {
 	lock.RLock()
 	defer lock.RUnlock()
 
-	return getView(expireSec, time.Now().Unix())
+	return getView(expireRound)
 }
 
 // GetStatus 组装看板载荷。明细只有本实例的观测，各实例之间本就不要求一致
-func GetStatus(ctx context.Context, expireSec int) model.Status {
+func GetStatus(ctx context.Context, expireRound int) model.Status {
 	lock.RLock()
 	defer lock.RUnlock()
 
@@ -166,18 +181,19 @@ func GetStatus(ctx context.Context, expireSec int) model.Status {
 	for url, list := range records {
 		copied[url] = append([]model.Record(nil), list...)
 	}
-	return model.Status{View: getView(expireSec, time.Now().Unix()), Records: copied}
+	return model.Status{View: getView(expireRound), Records: copied}
 }
 
 // Clean 清掉过期快照与窗口外明细。判定时本来就会跳过过期数据，这里只是别让内存一直涨
-func Clean(ctx context.Context, expireSec, windowSec int) {
+func Clean(ctx context.Context, expireRound, windowSec int) {
 	lock.Lock()
 	defer lock.Unlock()
 
 	now := time.Now().Unix()
-	for source, snapshot := range peerSnapshots {
-		if expire(snapshot, expireSec, now) {
+	for source := range peerSnapshots {
+		if expire(peerRounds[source], round, expireRound) {
 			delete(peerSnapshots, source)
+			delete(peerRounds, source)
 		}
 	}
 	for url, list := range records {
@@ -214,7 +230,8 @@ func converge(list []model.Record, offlineRound int) bool {
 	return false
 }
 
-func merge(ctx context.Context, peers map[string]model.Snapshot, selfId, source string, view model.View) {
+// merge 合并的纯逻辑。只有拿到原始产生时间更新的快照，才在rounds里把该身份键记成本轮拿到了新数据
+func merge(ctx context.Context, peers map[string]model.Snapshot, rounds map[string]int64, current int64, selfId, source string, view model.View) {
 	for key, snapshot := range view.Snapshots {
 		if key == model.SelfSource {
 			//对端自己那条的身份键是空的，回填成「我从哪个URL拿到的」
@@ -234,6 +251,7 @@ func merge(ctx context.Context, peers map[string]model.Snapshot, selfId, source 
 			continue
 		}
 		peers[key] = snapshot
+		rounds[key] = current
 	}
 	logrus.WithContext(ctx).WithFields(logrus.Fields{"source": source, "len": len(peers)}).Info("合并全局视图")
 }
@@ -258,10 +276,10 @@ func judge(list []model.Snapshot, url string) (bool, bool, int) {
 }
 
 // getView 组装交换载荷的纯逻辑。调用方必须已经持有锁
-func getView(expireSec int, now int64) model.View {
+func getView(expireRound int) model.View {
 	snapshots := make(map[string]model.Snapshot, len(peerSnapshots)+1)
 	for source, snapshot := range peerSnapshots {
-		if expire(snapshot, expireSec, now) {
+		if expire(peerRounds[source], round, expireRound) {
 			continue
 		}
 		snapshots[source] = snapshot
@@ -272,11 +290,11 @@ func getView(expireSec int, now int64) model.View {
 
 // snapshotList 判定分母：本实例的快照永远算，对端的只算没过期的。
 // 调用方必须已经持有锁
-func snapshotList(expireSec int, now int64) []model.Snapshot {
+func snapshotList(expireRound int) []model.Snapshot {
 	list := make([]model.Snapshot, 0, len(peerSnapshots)+1)
 	list = append(list, selfSnapshot)
-	for _, snapshot := range peerSnapshots {
-		if expire(snapshot, expireSec, now) {
+	for source, snapshot := range peerSnapshots {
+		if expire(peerRounds[source], round, expireRound) {
 			continue
 		}
 		list = append(list, snapshot)
@@ -284,6 +302,8 @@ func snapshotList(expireSec int, now int64) []model.Snapshot {
 	return list
 }
 
-func expire(snapshot model.Snapshot, expireSec int, now int64) bool {
-	return snapshot.Time <= 0 || now-snapshot.Time > int64(expireSec)
+// expire 在第updated轮拿到新数据之后，到第current轮已经连续expireRound轮没拿到新数据，就算过期。
+// 本轮刚拿到新数据时差值是0，永远新鲜
+func expire(updated, current int64, expireRound int) bool {
+	return current-updated >= int64(expireRound)
 }

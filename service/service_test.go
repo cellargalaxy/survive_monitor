@@ -161,16 +161,16 @@ func TestProbeUrlsInterval(t *testing.T) {
 // 没有URL时一轮只剩资源采集加轮末休眠：资源采集 休眠 资源采集 ...
 func TestMonitorSleep(t *testing.T) {
 	conf := model.Config{
-		ProbeIntervalSec:  1,
-		ProbeTimeoutSec:   3,
-		OfflineRound:      3,
-		SnapshotExpireSec: 300,
-		RecordWindowSec:   600,
-		DiskPath:          "/",
-		CpuUsageLimit:     1000,
-		MemUsageLimit:     1000,
-		DiskUsageLimit:    1000,
-		ResourceRound:     3,
+		ProbeIntervalSec:    1,
+		ProbeTimeoutSec:     3,
+		OfflineRound:        3,
+		SnapshotExpireRound: 5,
+		RecordWindowSec:     600,
+		DiskPath:            "/",
+		CpuUsageLimit:       1000,
+		MemUsageLimit:       1000,
+		DiskUsageLimit:      1000,
+		ResourceRound:       3,
 	}
 	begin := time.Now()
 	monitor(util.GenCtx(), conf)
@@ -185,11 +185,11 @@ func TestMonitorSleep(t *testing.T) {
 // URL列表为空时探测无事可做，但本机资源照样要采、要落进自己的快照，看板和资源告警才不会断
 func TestMonitorEmptyUrls(t *testing.T) {
 	conf := model.Config{
-		ProbeTimeoutSec:   3,
-		OfflineRound:      3,
-		SnapshotExpireSec: 300,
-		RecordWindowSec:   600,
-		DiskPath:          "/",
+		ProbeTimeoutSec:     3,
+		OfflineRound:        3,
+		SnapshotExpireRound: 5,
+		RecordWindowSec:     600,
+		DiskPath:            "/",
 		//阈值拉满，保证这一轮不会真的去发告警
 		CpuUsageLimit:  1000,
 		MemUsageLimit:  1000,
@@ -200,7 +200,7 @@ func TestMonitorEmptyUrls(t *testing.T) {
 	ctx := util.GenCtx()
 	monitor(ctx, conf)
 
-	self, ok := view.GetView(ctx, conf.SnapshotExpireSec).Snapshots[model.SelfSource]
+	self, ok := view.GetView(ctx, conf.SnapshotExpireRound).Snapshots[model.SelfSource]
 	if !ok {
 		t.Fatalf("URL列表为空也该落下自己的快照")
 	}
@@ -212,5 +212,48 @@ func TestMonitorEmptyUrls(t *testing.T) {
 	}
 	if len(self.Probes) != 0 {
 		t.Errorf("没有URL就不该有探测结论，实际: %+v", self.Probes)
+	}
+}
+
+// 对端一直返回同一份旧快照(产生时间不变)，等于拿不到新数据：连续snapshot_expire_round轮之后就过期出局
+func TestMonitorExpireRound(t *testing.T) {
+	peer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		view := model.View{Snapshots: map[string]model.Snapshot{
+			model.SelfSource: {Id: "stuck-peer", Time: 1700000000, Probes: map[string]bool{"https://x/": true}},
+		}}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Write(util.JsonStruct2Data(util.NewHttpRespByErr(view, nil)))
+	}))
+	defer peer.Close()
+
+	conf := model.Config{
+		Urls:                []string{peer.URL},
+		ProbeTimeoutSec:     3,
+		OfflineRound:        3,
+		SnapshotExpireRound: 2,
+		RecordWindowSec:     600,
+		DiskPath:            "/",
+		CpuUsageLimit:       1000,
+		MemUsageLimit:       1000,
+		DiskUsageLimit:      1000,
+		ResourceRound:       3,
+	}
+	ctx := util.GenCtx()
+	exist := func() bool {
+		_, ok := view.GetView(ctx, conf.SnapshotExpireRound).Snapshots[peer.URL]
+		return ok
+	}
+
+	monitor(ctx, conf)
+	if !exist() {
+		t.Fatalf("第1轮拿到新数据，对端快照该在")
+	}
+	monitor(ctx, conf)
+	if !exist() {
+		t.Fatalf("才1轮没拿到新数据，还没到2轮，对端快照该在")
+	}
+	monitor(ctx, conf)
+	if exist() {
+		t.Fatalf("连续2轮没拿到新数据，对端快照该过期")
 	}
 }

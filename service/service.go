@@ -20,6 +20,8 @@ func Monitor(ctx context.Context) {
 }
 
 func monitor(ctx context.Context, conf model.Config) {
+	//快照过期按本实例的轮数算，轮数在每轮开头推进
+	view.NextRound(ctx)
 	//轮末休眠放在defer里：本轮哪一步panic了也照样睡够再走，守护池的休眠是0，不睡就会panic一次立刻重来一次地空转
 	defer util.Sleep(ctx, time.Duration(conf.ProbeIntervalSec)*time.Second)
 
@@ -43,7 +45,7 @@ func monitor(ctx context.Context, conf model.Config) {
 
 	alarmUrl(ctx, conf)
 	alarmResource(ctx, conf, resource)
-	view.Clean(ctx, conf.SnapshotExpireSec, conf.RecordWindowSec)
+	view.Clean(ctx, conf.SnapshotExpireRound, conf.RecordWindowSec)
 }
 
 // probeUrls 逐个串行探测全部URL，每探完一个休眠probe_interval_sec，落下明细，并把解析到全局视图的那些按来源URL收集起来。

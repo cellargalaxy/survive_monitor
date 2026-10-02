@@ -88,7 +88,7 @@ func setView(t *testing.T, ctx context.Context, probes map[string]bool, alarms m
 // 首次判离线就发，发过之后要按退避压住，退避到点才再发；这几条一起决定了不会每轮重复轰炸
 func TestJudgeAlarmOffline(t *testing.T) {
 	ctx := util.GenCtx()
-	conf := model.Config{Urls: []string{"https://dead/"}, SnapshotExpireSec: 300, AlarmBackoffSec: []int{300, 1800}}
+	conf := model.Config{Urls: []string{"https://dead/"}, SnapshotExpireRound: 5, AlarmBackoffSec: []int{300, 1800}}
 	now := int64(1700000000)
 
 	setView(t, ctx, map[string]bool{"https://dead/": false}, nil)
@@ -120,7 +120,7 @@ func TestJudgeAlarmOffline(t *testing.T) {
 // 恢复只要有一个实例说在线就算，并且要把记录删掉，否则再次离线会被旧记录按成退避
 func TestJudgeAlarmRecover(t *testing.T) {
 	ctx := util.GenCtx()
-	conf := model.Config{Urls: []string{"https://back/"}, SnapshotExpireSec: 300, AlarmBackoffSec: []int{300}}
+	conf := model.Config{Urls: []string{"https://back/"}, SnapshotExpireRound: 5, AlarmBackoffSec: []int{300}}
 	now := int64(1700000000)
 
 	setView(t, ctx, map[string]bool{"https://back/": true}, map[string]model.Alarm{
@@ -149,7 +149,7 @@ func TestJudgeAlarmRecover(t *testing.T) {
 // 没有任何新鲜结论时保持现状，既不告警也不恢复
 func TestJudgeAlarmNoConclusion(t *testing.T) {
 	ctx := util.GenCtx()
-	conf := model.Config{Urls: []string{"https://unknown/"}, SnapshotExpireSec: 300, AlarmBackoffSec: []int{300}}
+	conf := model.Config{Urls: []string{"https://unknown/"}, SnapshotExpireRound: 5, AlarmBackoffSec: []int{300}}
 
 	view.DelAlarm(ctx, "https://unknown/")
 	setView(t, ctx, map[string]bool{"https://other/": false}, nil)

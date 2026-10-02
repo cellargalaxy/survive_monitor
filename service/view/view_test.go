@@ -88,7 +88,7 @@ func TestConverge(t *testing.T) {
 func TestMergeFillSource(t *testing.T) {
 	ctx := util.GenCtx()
 	peers := make(map[string]model.Snapshot)
-	merge(ctx, peers, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
+	merge(ctx, peers, make(map[string]int64), 1, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
 		model.SelfSource: {Id: "peer-id", Time: 100, Probes: map[string]bool{"url": true}},
 	}})
 
@@ -107,7 +107,7 @@ func TestMergeFillSource(t *testing.T) {
 func TestMergeDropSelf(t *testing.T) {
 	ctx := util.GenCtx()
 	peers := make(map[string]model.Snapshot)
-	merge(ctx, peers, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
+	merge(ctx, peers, make(map[string]int64), 1, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
 		"https://me/api/view":    {Id: "my-id", Time: 100, Probes: map[string]bool{"url": true}},
 		"https://other/api/view": {Id: "other-id", Time: 100, Probes: map[string]bool{"url": true}},
 	}})
@@ -125,7 +125,7 @@ func TestMergeKeepNewer(t *testing.T) {
 	peers := map[string]model.Snapshot{
 		"https://peer/api/view": {Id: "peer-id", Time: 200, Probes: map[string]bool{"url": false}},
 	}
-	merge(ctx, peers, "my-id", "https://relay/api/view", model.View{Snapshots: map[string]model.Snapshot{
+	merge(ctx, peers, make(map[string]int64), 1, "my-id", "https://relay/api/view", model.View{Snapshots: map[string]model.Snapshot{
 		"https://peer/api/view": {Id: "peer-id", Time: 100, Probes: map[string]bool{"url": true}},
 	}})
 
@@ -133,7 +133,7 @@ func TestMergeKeepNewer(t *testing.T) {
 		t.Fatalf("旧数据不许盖掉新数据，期望 time=200，实际 %d", peers["https://peer/api/view"].Time)
 	}
 
-	merge(ctx, peers, "my-id", "https://relay/api/view", model.View{Snapshots: map[string]model.Snapshot{
+	merge(ctx, peers, make(map[string]int64), 1, "my-id", "https://relay/api/view", model.View{Snapshots: map[string]model.Snapshot{
 		"https://peer/api/view": {Id: "peer-id", Time: 300, Probes: map[string]bool{"url": true}},
 	}})
 	if peers["https://peer/api/view"].Time != 300 {
@@ -165,37 +165,71 @@ func TestTrimRecords(t *testing.T) {
 	}
 }
 
+// 过期按轮数：拿到新数据之后连续expireRound轮都没再拿到，才算过期
 func TestExpire(t *testing.T) {
 	cases := map[string]struct {
-		snapshot model.Snapshot
-		expect   bool
+		updated int64
+		current int64
+		expect  bool
 	}{
-		"时间为零算过期":   {snapshot: model.Snapshot{Time: 0}, expect: true},
-		"刚好到边界不算过期": {snapshot: model.Snapshot{Time: 40}, expect: false},
-		"超过边界算过期":   {snapshot: model.Snapshot{Time: 39}, expect: true},
+		"本轮刚拿到新数据":     {updated: 10, current: 10, expect: false},
+		"差一轮才到过期轮数":    {updated: 10, current: 12, expect: false},
+		"连续3轮没新数据算过期":  {updated: 10, current: 13, expect: true},
+		"从没拿到过新数据也算过期": {updated: 0, current: 13, expect: true},
 	}
 
 	for name := range cases {
 		one := cases[name]
-		actual := expire(one.snapshot, 60, 100)
+		actual := expire(one.updated, one.current, 3)
 		if actual != one.expect {
 			t.Errorf("[%s] 期望 %v，实际 %v", name, one.expect, actual)
 		}
 	}
 }
 
+// 只有原始产生时间更新的快照才算新数据，再拉到一份同样的旧快照不能续命，
+// 否则实例之间来回转发一份挂掉实例的旧快照，它就永远不过期
+func TestMergeRefreshRound(t *testing.T) {
+	ctx := util.GenCtx()
+	peers := make(map[string]model.Snapshot)
+	rounds := make(map[string]int64)
+
+	merge(ctx, peers, rounds, 1, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
+		model.SelfSource: {Id: "peer-id", Time: 100},
+	}})
+	if rounds["https://peer/api/view"] != 1 {
+		t.Fatalf("第1轮拿到新数据，期望记成1，实际 %d", rounds["https://peer/api/view"])
+	}
+
+	merge(ctx, peers, rounds, 2, "my-id", "https://relay/api/view", model.View{Snapshots: map[string]model.Snapshot{
+		"https://peer/api/view": {Id: "peer-id", Time: 100},
+	}})
+	if rounds["https://peer/api/view"] != 1 {
+		t.Fatalf("同一份旧快照被转发回来不算新数据，期望仍是1，实际 %d", rounds["https://peer/api/view"])
+	}
+
+	merge(ctx, peers, rounds, 3, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
+		model.SelfSource: {Id: "peer-id", Time: 130},
+	}})
+	if rounds["https://peer/api/view"] != 3 {
+		t.Fatalf("第3轮拿到更新的快照，期望记成3，实际 %d", rounds["https://peer/api/view"])
+	}
+}
+
 // 自己的快照永远在分母里，对端的只算没过期的
 func TestSnapshotList(t *testing.T) {
 	lock.Lock()
+	round = 100
 	selfSnapshot = model.Snapshot{Id: "self", Time: 100}
 	peerSnapshots = map[string]model.Snapshot{
 		"fresh": {Id: "fresh", Time: 95},
 		"stale": {Id: "stale", Time: 10},
 	}
+	peerRounds = map[string]int64{"fresh": 99, "stale": 90}
 	lock.Unlock()
 
 	lock.RLock()
-	list := snapshotList(60, 100)
+	list := snapshotList(3)
 	lock.RUnlock()
 
 	if len(list) != 2 {
@@ -205,5 +239,29 @@ func TestSnapshotList(t *testing.T) {
 		if list[i].Id == "stale" {
 			t.Fatalf("过期对端不该进分母: %+v", list)
 		}
+	}
+}
+
+// 过期的对端要连同轮数记录一起清掉，不然内存只增不减
+func TestCleanExpire(t *testing.T) {
+	ctx := util.GenCtx()
+	lock.Lock()
+	round = 100
+	peerSnapshots = map[string]model.Snapshot{"fresh": {Id: "fresh", Time: 95}, "stale": {Id: "stale", Time: 10}}
+	peerRounds = map[string]int64{"fresh": 99, "stale": 90}
+	lock.Unlock()
+
+	Clean(ctx, 3, 600)
+
+	lock.RLock()
+	defer lock.RUnlock()
+	if _, ok := peerSnapshots["stale"]; ok {
+		t.Errorf("过期快照该被清掉")
+	}
+	if _, ok := peerRounds["stale"]; ok {
+		t.Errorf("过期快照的轮数记录该一起清掉")
+	}
+	if _, ok := peerSnapshots["fresh"]; !ok {
+		t.Errorf("新鲜快照不该被清掉")
 	}
 }
