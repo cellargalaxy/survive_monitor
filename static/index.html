@@ -270,7 +270,8 @@
       + '<div class="tile"><div class="num" style="color:var(--muted)">' + unknown + '</div><div class="label">无结论</div></div>'
       + '<div class="tile"><div class="num">' + (instanceCount + 1) + '</div><div class="label">实例</div></div>';
 
-    var windowSec = 86400;
+    // 健康条的时间轴跟着后端的明细保留窗口走；老版本后端没有这个字段，按1天兜底
+    var windowSec = status.record_window_sec > 0 ? status.record_window_sec : 86400;
     var html = '';
     var domains = Object.keys(groups).sort();
     for (var d = 0; d < domains.length; d++) {

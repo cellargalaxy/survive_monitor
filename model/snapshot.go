@@ -19,8 +19,9 @@ type View struct {
 }
 
 type Status struct {
-	View    View                `json:"view"`    //全局视图
-	Records map[string][]Record `json:"records"` //URL -> 探测明细，只有本实例的观测，各实例之间不要求一致
+	View            View                `json:"view"`              //全局视图
+	Records         map[string][]Record `json:"records"`           //URL -> 探测明细，只有本实例的观测，各实例之间不要求一致
+	RecordWindowSec int                 `json:"record_window_sec"` //明细保留窗口，秒；看板健康条按它铺满，跟着配置走
 }
 
 type Record struct {

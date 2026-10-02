@@ -13,7 +13,10 @@ func GetView(ctx context.Context) model.View {
 	return view.GetView(ctx, config.GetConfig(ctx).SnapshotExpireSec)
 }
 
-// GetStatus 看板载荷
+// GetStatus 看板载荷。明细窗口一并带上，前端健康条的时间轴才能跟着record_window_sec走，而不是写死
 func GetStatus(ctx context.Context) model.Status {
-	return view.GetStatus(ctx, config.GetConfig(ctx).SnapshotExpireSec)
+	conf := config.GetConfig(ctx)
+	status := view.GetStatus(ctx, conf.SnapshotExpireSec)
+	status.RecordWindowSec = conf.RecordWindowSec
+	return status
 }

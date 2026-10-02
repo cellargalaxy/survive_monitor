@@ -77,6 +77,10 @@ func TestGinStatus(t *testing.T) {
 	if len(resp.Data.View.Snapshots) == 0 {
 		t.Fatalf("看板至少该带上自己那条快照")
 	}
+	//前端健康条的时间轴靠这个字段铺，必须跟配置一致，不能是零值
+	if expect := config.GetConfig(ctx).RecordWindowSec; expect <= 0 || resp.Data.RecordWindowSec != expect {
+		t.Errorf("明细窗口期望 %d，实际 %d", expect, resp.Data.RecordWindowSec)
+	}
 }
 
 func TestGinPing(t *testing.T) {
