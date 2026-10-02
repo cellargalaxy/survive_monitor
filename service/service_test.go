@@ -1,8 +1,11 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,7 +14,7 @@ import (
 	"github.com/cellargalaxy/survive_monitor/service/view"
 )
 
-// probeUrls 要同时做三件事：并发探完、落下明细、把能解析的视图按来源收集起来。
+// probeUrls 要同时做三件事：串行探完、落下明细、把能解析的视图按来源收集起来。
 // 这里用本地服务替掉真实URL，顺带验了「普通URL只知道活着」和「探不通就是失败」两条分支
 func TestProbeUrls(t *testing.T) {
 	peer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -34,12 +37,11 @@ func TestProbeUrls(t *testing.T) {
 	dead.Close()
 
 	conf := model.Config{
-		Urls:             []string{peer.URL, plain.URL, deadUrl},
-		ProbeBudgetSec:   10,
-		ProbeTimeoutSec:  3,
-		ProbeConcurrency: 4,
-		RecordWindowSec:  600,
-		OfflineRound:     1,
+		Urls:            []string{peer.URL, plain.URL, deadUrl},
+		ProbeBudgetSec:  10,
+		ProbeTimeoutSec: 3,
+		RecordWindowSec: 600,
+		OfflineRound:    1,
 	}
 
 	ctx := util.GenCtx()
@@ -64,12 +66,72 @@ func TestProbeUrls(t *testing.T) {
 	}
 }
 
+// 串行探测：同一时刻最多只有一个请求在飞，这是取消并发的全部目的
+func TestProbeUrlsSerial(t *testing.T) {
+	var doing, maxDoing atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		current := doing.Add(1)
+		defer doing.Add(-1)
+		for {
+			old := maxDoing.Load()
+			if current <= old || maxDoing.CompareAndSwap(old, current) {
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	conf := model.Config{ProbeBudgetSec: 10, ProbeTimeoutSec: 3, RecordWindowSec: 600, OfflineRound: 1}
+	for i := 0; i < 5; i++ {
+		conf.Urls = append(conf.Urls, fmt.Sprintf("%s/serial/%d", server.URL, i))
+	}
+	probeUrls(util.GenCtx(), conf)
+
+	if maxDoing.Load() != 1 {
+		t.Errorf("串行探测同一时刻应只有1个请求，实际最多 %d 个", maxDoing.Load())
+	}
+}
+
+// 预算用完时，正在探的那个被掐断记失败，还没轮到的不再发请求、直接记失败
+func TestProbeUrlsBudget(t *testing.T) {
+	var count atomic.Int32
+	slow := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		count.Add(1)
+		time.Sleep(2 * time.Second)
+	}))
+	defer slow.Close()
+
+	conf := model.Config{
+		Urls:            []string{slow.URL + "/budget/0", slow.URL + "/budget/1"},
+		ProbeTimeoutSec: 3,
+		RecordWindowSec: 600,
+		OfflineRound:    1,
+	}
+	ctx, cancel := context.WithTimeout(util.GenCtx(), time.Second)
+	defer cancel()
+	begin := time.Now()
+	probeUrls(ctx, conf)
+
+	if cost := time.Since(begin); cost > 1500*time.Millisecond {
+		t.Errorf("预算1秒，整轮不该拖到 %v", cost)
+	}
+	if count.Load() != 1 {
+		t.Errorf("预算用完后不该再发请求，期望服务端只收到 1 次，实际 %d 次", count.Load())
+	}
+	probes := view.Converge(util.GenCtx(), conf.Urls, conf.OfflineRound)
+	for _, url := range conf.Urls {
+		if probes[url] {
+			t.Errorf("超预算的URL该记失败: %s", url)
+		}
+	}
+}
+
 // URL列表为空时探测无事可做，但本机资源照样要采、要落进自己的快照，看板和资源告警才不会断
 func TestMonitorEmptyUrls(t *testing.T) {
 	conf := model.Config{
 		ProbeBudgetSec:    10,
 		ProbeTimeoutSec:   3,
-		ProbeConcurrency:  4,
 		OfflineRound:      3,
 		SnapshotExpireSec: 300,
 		RecordWindowSec:   600,

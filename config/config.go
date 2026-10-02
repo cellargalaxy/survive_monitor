@@ -16,7 +16,6 @@ const (
 	probeIntervalSec  = 60    //探测间隔：1分钟
 	probeBudgetSec    = 45    //单轮探测预算：45秒，留足余量给下一轮
 	probeTimeoutSec   = 5     //单次探测超时：5秒
-	probeConcurrency  = 16    //探测并发数
 	offlineRound      = 3     //连续3轮失败才判离线
 	snapshotExpireSec = 300   //快照过期：5分钟
 	recordWindowSec   = 86400 //看板明细保留：1天
@@ -68,6 +67,10 @@ func (this *ConfigHandler) Parse(ctx context.Context, text string) (model.Config
 	if len(config.Urls) == 0 {
 		logrus.WithContext(ctx).WithFields(logrus.Fields{}).Warn("加载配置，URL列表为空")
 	}
+	//串行探测最坏耗时是URL数×单次超时，超过单轮预算时排在后面的URL可能一个请求都没发就被记失败
+	if worstSec := len(config.Urls) * config.ProbeTimeoutSec; worstSec > config.ProbeBudgetSec {
+		logrus.WithContext(ctx).WithFields(logrus.Fields{"url": len(config.Urls), "timeout": config.ProbeTimeoutSec, "worst": worstSec, "budget": config.ProbeBudgetSec}).Warn("加载配置，串行探测最坏耗时超过单轮预算")
+	}
 	logrus.WithContext(ctx).WithFields(logrus.Fields{"config": config}).Info("加载配置")
 	return config, nil
 }
@@ -81,9 +84,6 @@ func fillConfig(config *model.Config) {
 	}
 	if config.ProbeTimeoutSec <= 0 {
 		config.ProbeTimeoutSec = probeTimeoutSec
-	}
-	if config.ProbeConcurrency <= 0 {
-		config.ProbeConcurrency = probeConcurrency
 	}
 	if config.OfflineRound <= 0 {
 		config.OfflineRound = offlineRound

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/cellargalaxy/go_common/util"
@@ -14,7 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// Monitor 跑一轮监听：并发探测 -> 落明细 -> 收敛本实例结论 -> 采集本机资源 -> 合并对端视图 -> 判定 -> 告警
+// Monitor 跑一轮监听：串行探测 -> 落明细 -> 收敛本实例结论 -> 采集本机资源 -> 合并对端视图 -> 判定 -> 告警
 func Monitor(ctx context.Context) {
 	monitor(ctx, config.GetConfig(ctx))
 }
@@ -47,51 +46,37 @@ func monitor(ctx context.Context, conf model.Config) {
 	view.Clean(ctx, conf.SnapshotExpireSec, conf.RecordWindowSec)
 }
 
-// probeUrls 在预算内并发探测全部URL，落下明细，并把解析到全局视图的那些按来源URL收集起来
+// probeUrls 在预算内逐个串行探测全部URL，落下明细，并把解析到全局视图的那些按来源URL收集起来。
+// 串行是为了不给本机和被探测的服务添压力，代价是单轮耗时随URL数量线性增长，最坏是URL数×单次超时
 func probeUrls(ctx context.Context, conf model.Config) map[string]*model.View {
 	timeout := time.Duration(conf.ProbeTimeoutSec) * time.Second
-	//并发数为零会让令牌通道变成无缓冲的，拿令牌的协程就永远等不到人来收，整轮卡死
-	concurrency := conf.ProbeConcurrency
-	if concurrency <= 0 {
-		concurrency = 1
-	}
-	token := make(chan struct{}, concurrency)
-	var group sync.WaitGroup
-	var collectLock sync.Mutex
 	views := make(map[string]*model.View)
 
 	for i := range conf.Urls {
 		url := conf.Urls[i]
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			defer util.Defer(func(panic any, stack string) {
-				if panic != nil {
-					logrus.WithContext(ctx).WithFields(logrus.Fields{"url": url, "panic": panic, "stack": stack}).Error("探测URL，异常")
-				}
-			})
-
-			select {
-			case token <- struct{}{}:
-			case <-ctx.Done():
-				//预算用完还没排上队，本轮就按失败计，不必再白跑一次必然超时的请求
-				view.SaveRecord(ctx, url, false, conf.RecordWindowSec)
-				return
-			}
-			defer func() { <-token }()
-
-			alive, peer := probe.Probe(ctx, url, timeout)
-			view.SaveRecord(ctx, url, alive, conf.RecordWindowSec)
-			if peer == nil {
-				return
-			}
-			collectLock.Lock()
-			defer collectLock.Unlock()
+		//预算用完还没轮到的，本轮就按失败计，不必再白跑一次必然超时的请求
+		if util.CtxDone(ctx) {
+			view.SaveRecord(ctx, url, false, conf.RecordWindowSec)
+			continue
+		}
+		alive, peer := probeUrl(ctx, url, timeout)
+		view.SaveRecord(ctx, url, alive, conf.RecordWindowSec)
+		if peer != nil {
 			views[url] = peer
-		}()
+		}
 	}
-	group.Wait()
 
 	logrus.WithContext(ctx).WithFields(logrus.Fields{"url": len(conf.Urls), "view": len(views)}).Info("监听一轮，探测完成")
 	return views
+}
+
+// probeUrl 探测单个URL并兜住panic，一个URL出问题不能把整轮后面的URL都带崩，panic按失败计
+func probeUrl(ctx context.Context, url string, timeout time.Duration) (alive bool, peer *model.View) {
+	defer util.Defer(func(panic any, stack string) {
+		if panic != nil {
+			logrus.WithContext(ctx).WithFields(logrus.Fields{"url": url, "panic": panic, "stack": stack}).Error("探测URL，异常")
+			alive, peer = false, nil
+		}
+	})
+	return probe.Probe(ctx, url, timeout)
 }

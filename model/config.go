@@ -15,7 +15,6 @@ type Config struct {
 	ProbeIntervalSec  int      `json:"probe_interval_sec" yaml:"probe_interval_sec"`   //探测间隔，秒；服务启动时读一次，改完要重启
 	ProbeBudgetSec    int      `json:"probe_budget_sec" yaml:"probe_budget_sec"`       //单轮探测预算，秒；超预算未完成的URL按失败计
 	ProbeTimeoutSec   int      `json:"probe_timeout_sec" yaml:"probe_timeout_sec"`     //单次探测超时，秒
-	ProbeConcurrency  int      `json:"probe_concurrency" yaml:"probe_concurrency"`     //探测并发数
 	OfflineRound      int      `json:"offline_round" yaml:"offline_round"`             //连续失败多少轮，本实例才判定该URL离线
 	SnapshotExpireSec int      `json:"snapshot_expire_sec" yaml:"snapshot_expire_sec"` //快照过期时长，秒；过期的不参与判定
 	RecordWindowSec   int      `json:"record_window_sec" yaml:"record_window_sec"`     //看板明细保留窗口，秒
