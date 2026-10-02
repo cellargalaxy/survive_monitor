@@ -19,7 +19,7 @@ const cpuUsageInterval = time.Second
 // 比如在flatpak沙箱(GoLand等)里跑，根目录就是一块tmpfs，看板上会出现「136KB / 7.5GB」这种数
 var memoryFsTypes = map[string]bool{"tmpfs": true, "ramfs": true, "devtmpfs": true}
 
-// fallbackWarned 记下已经提示过回退的路径，每分钟一轮，不能每轮都刷一条Warn
+// fallbackWarned 记下已经提示过回退的路径，每轮都要采集，不能每轮都刷一条Warn
 var fallbackWarned sync.Map
 
 // LoadResource 采集本机资源。单项采不到就留零值并返回错误，已经采到的那几项照样可用，

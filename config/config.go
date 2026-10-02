@@ -88,6 +88,7 @@ func fillConfig(config *model.Config) {
 	if config.RecordWindowSec <= 0 {
 		config.RecordWindowSec = recordWindowSec
 	}
+	config.AlarmBackoffSec = cleanBackoff(config.AlarmBackoffSec)
 	if len(config.AlarmBackoffSec) == 0 {
 		config.AlarmBackoffSec = alarmBackoffSec
 	}
@@ -120,6 +121,17 @@ func cleanUrls(urls []string) []string {
 		}
 		exist[url] = true
 		list = append(list, url)
+	}
+	return list
+}
+
+// cleanBackoff 去掉不为正的阶。退避为0等于不退避，持续离线时每轮都发一条，几十秒一条地刷屏
+func cleanBackoff(steps []int) []int {
+	list := make([]int, 0, len(steps))
+	for i := range steps {
+		if steps[i] > 0 {
+			list = append(list, steps[i])
+		}
 	}
 	return list
 }

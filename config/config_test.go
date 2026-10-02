@@ -77,6 +77,28 @@ func TestParseCleanUrls(t *testing.T) {
 	}
 }
 
+// 退避阶梯里不为正的阶要去掉，全都不为正就回落到默认值，否则持续离线时每轮都发
+func TestParseCleanBackoff(t *testing.T) {
+	ctx := util.GenCtx()
+	handler := new(ConfigHandler)
+
+	conf, err := handler.Parse(ctx, "alarm_backoff_sec: [0, 600, -1, 3600]\n")
+	if err != nil {
+		t.Fatalf("应能解析: %+v", err)
+	}
+	if len(conf.AlarmBackoffSec) != 2 || conf.AlarmBackoffSec[0] != 600 || conf.AlarmBackoffSec[1] != 3600 {
+		t.Fatalf("退避阶梯期望 [600 3600]，实际 %+v", conf.AlarmBackoffSec)
+	}
+
+	conf, err = handler.Parse(ctx, "alarm_backoff_sec: [0]\n")
+	if err != nil {
+		t.Fatalf("应能解析: %+v", err)
+	}
+	if len(conf.AlarmBackoffSec) != len(alarmBackoffSec) {
+		t.Fatalf("全都不为正该回落到默认值，实际 %+v", conf.AlarmBackoffSec)
+	}
+}
+
 func TestParseIllegal(t *testing.T) {
 	ctx := util.GenCtx()
 	handler := new(ConfigHandler)

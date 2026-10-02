@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/cellargalaxy/go_common/util"
@@ -94,4 +95,15 @@ func TestGinPing(t *testing.T) {
 	engine := NewEngine(ctx)
 
 	get(t, engine, util.PathPing)
+}
+
+// 看板页面不许被长缓存，否则升级之后浏览器还跑着旧页面
+func TestStaticNoCache(t *testing.T) {
+	ctx := util.GenCtx()
+	engine := NewEngine(ctx)
+
+	recorder := get(t, engine, util.PathStatic+"/")
+	if cache := recorder.Header().Get("Cache-Control"); strings.Contains(cache, "max-age") {
+		t.Fatalf("看板页面不该带长缓存，实际 Cache-Control: %s", cache)
+	}
 }

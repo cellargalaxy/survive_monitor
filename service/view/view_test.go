@@ -60,27 +60,29 @@ func TestJudge(t *testing.T) {
 	}
 }
 
-// 明细攒不够轮数就不许判离线，否则服务刚起来会把全世界报死
+// 明细攒不够轮数就不许判离线，否则服务刚起来会把全世界报死；也不许记成在线，否则重启就是一张空头在线票，会给还在离线的URL发假恢复
 func TestConverge(t *testing.T) {
 	cases := map[string]struct {
-		list   []model.Record
-		round  int
-		expect bool
+		list  []model.Record
+		round int
+		alive bool
+		ok    bool
 	}{
-		"没有明细":      {list: nil, round: 3, expect: true},
-		"明细不够轮数":    {list: []model.Record{{Alive: false}, {Alive: false}}, round: 3, expect: true},
-		"连续三轮全失败":   {list: []model.Record{{Alive: false}, {Alive: false}, {Alive: false}}, round: 3, expect: false},
-		"最近三轮里有成功":  {list: []model.Record{{Alive: false}, {Alive: true}, {Alive: false}}, round: 3, expect: true},
-		"早先失败但最近成功": {list: []model.Record{{Alive: false}, {Alive: false}, {Alive: false}, {Alive: true}}, round: 3, expect: true},
-		"最近三轮全失败":   {list: []model.Record{{Alive: true}, {Alive: false}, {Alive: false}, {Alive: false}}, round: 3, expect: false},
-		"轮数为一":      {list: []model.Record{{Alive: false}}, round: 1, expect: false},
+		"没有明细":      {list: nil, round: 3, alive: false, ok: false},
+		"明细不够轮数":    {list: []model.Record{{Alive: false}, {Alive: false}}, round: 3, alive: false, ok: false},
+		"不够轮数但成功过":  {list: []model.Record{{Alive: false}, {Alive: true}}, round: 3, alive: true, ok: true},
+		"连续三轮全失败":   {list: []model.Record{{Alive: false}, {Alive: false}, {Alive: false}}, round: 3, alive: false, ok: true},
+		"最近三轮里有成功":  {list: []model.Record{{Alive: false}, {Alive: true}, {Alive: false}}, round: 3, alive: true, ok: true},
+		"早先失败但最近成功": {list: []model.Record{{Alive: false}, {Alive: false}, {Alive: false}, {Alive: true}}, round: 3, alive: true, ok: true},
+		"最近三轮全失败":   {list: []model.Record{{Alive: true}, {Alive: false}, {Alive: false}, {Alive: false}}, round: 3, alive: false, ok: true},
+		"轮数为一":      {list: []model.Record{{Alive: false}}, round: 1, alive: false, ok: true},
 	}
 
 	for name := range cases {
 		one := cases[name]
-		actual := converge(one.list, one.round)
-		if actual != one.expect {
-			t.Errorf("[%s] 期望 %v，实际 %v", name, one.expect, actual)
+		alive, ok := converge(one.list, one.round)
+		if alive != one.alive || ok != one.ok {
+			t.Errorf("[%s] 期望 alive=%v ok=%v，实际 alive=%v ok=%v", name, one.alive, one.ok, alive, ok)
 		}
 	}
 }

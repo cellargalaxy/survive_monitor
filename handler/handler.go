@@ -30,7 +30,8 @@ func NewEngine(ctx context.Context) *gin.Engine {
 	engine.GET(config.PathView, GinView)
 	engine.GET(config.PathStatus, GinStatus)
 
-	engine.Use(util.StaticCache)
+	//不挂util.StaticCache：看板只有一个index.html，脚本全内联、文件名也不带版本号，
+	//缓存一天的话升级之后浏览器还跑着旧页面，后端加了字段前端也看不到。文件才十几KB，每次重新拉不费事
 	engine.StaticFS(util.PathStatic, http.FS(static.StaticFile))
 	return engine
 }

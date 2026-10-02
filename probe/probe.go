@@ -68,7 +68,8 @@ func ParseView(ctx context.Context, data []byte) (*model.View, bool) {
 }
 
 // getClient 按超时缓存客户端。不能用util.NewHttpClientReq，那个共享客户端带重试且4xx会把地址短时封禁，
-// 探测要的是「一次请求、一个结论」，重试会把单轮拖长，封禁更会让下一轮凭空多出一个失败
+// 探测要的是「一次请求、一个结论」，重试会把单轮拖长，封禁更会让下一轮凭空多出一个失败。
+// 跳过TLS证书校验是有意的：只关心服务有没有响应，证书过期、自签名都不算离线
 func getClient(ctx context.Context, timeout time.Duration) *resty.Client {
 	clientLock.RLock()
 	client := clients[timeout]

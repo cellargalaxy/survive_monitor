@@ -52,15 +52,19 @@ func SaveRecord(ctx context.Context, url string, alive bool, windowSec int) {
 	records[url] = trimRecords(list, windowSec, now)
 }
 
-// Converge 把本实例最近几轮的明细收敛成「在线/离线」结论。只有连续offlineRound轮全失败才算离线，
-// 明细还没攒够轮数时一律算在线，免得服务刚起来就把全世界报死
+// Converge 把本实例最近几轮的明细收敛成「在线/离线」结论。只有连续offlineRound轮全失败才算离线；
+// 明细还没攒够轮数、又一次都没成功过的URL不给结论，不进结果，免得服务刚起来就把全世界报死。
+// 不能图省事记成在线：恢复只要任一实例说在线就算，实例一重启就会拿这张空头在线票，给还在离线的URL发一条假恢复
 func Converge(ctx context.Context, urls []string, offlineRound int) map[string]bool {
 	lock.RLock()
 	defer lock.RUnlock()
 
 	probes := make(map[string]bool, len(urls))
 	for i := range urls {
-		probes[urls[i]] = converge(records[urls[i]], offlineRound)
+		alive, ok := converge(records[urls[i]], offlineRound)
+		if ok {
+			probes[urls[i]] = alive
+		}
 	}
 	return probes
 }
@@ -352,16 +356,25 @@ func trimRecords(list []model.Record, windowSec int, now int64) []model.Record {
 	return append([]model.Record(nil), list[begin:]...)
 }
 
-func converge(list []model.Record, offlineRound int) bool {
-	if offlineRound <= 0 || len(list) < offlineRound {
-		return true
+// converge 收敛单个URL。最近offlineRound轮里成功过一次就是在线；全失败且攒够了轮数才是离线；
+// 没攒够轮数又全失败，ok为false，表示还给不出结论
+func converge(list []model.Record, offlineRound int) (alive bool, ok bool) {
+	if offlineRound <= 0 {
+		offlineRound = 1
 	}
-	for i := len(list) - offlineRound; i < len(list); i++ {
+	begin := len(list) - offlineRound
+	if begin < 0 {
+		begin = 0
+	}
+	for i := begin; i < len(list); i++ {
 		if list[i].Alive {
-			return true
+			return true, true
 		}
 	}
-	return false
+	if len(list) < offlineRound {
+		return false, false
+	}
+	return false, true
 }
 
 // merge 合并的纯逻辑。只有拿到原始产生时间更新的快照，才在rounds里把该身份键记成本轮拿到了新数据；

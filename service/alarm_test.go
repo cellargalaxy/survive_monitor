@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cellargalaxy/go_common/util"
 	"github.com/cellargalaxy/survive_monitor/model"
@@ -207,5 +208,29 @@ func TestJudgeAlarmRecoverByPeer(t *testing.T) {
 	offlines, recovers, _, _ := judgeAlarm(ctx, conf, now)
 	if len(offlines) != 0 || len(recovers) != 0 {
 		t.Fatalf("对端已经发过恢复，本实例不该再发，实际 offline=%d recover=%d", len(offlines), len(recovers))
+	}
+}
+
+// 实例刚重启、明细还没攒够轮数时不给结论，不能投空头在线票：
+// 否则对端还在报离线、告警记录也还在，本实例一票在线就会给一个仍然离线的URL发假恢复
+func TestJudgeAlarmRestartNoFakeRecover(t *testing.T) {
+	ctx := util.GenCtx()
+	url := "https://restart/"
+	conf := model.Config{Urls: []string{url}, OfflineRound: 3, SnapshotExpireRound: 5, AlarmBackoffSec: []int{300}}
+	now := time.Now().Unix()
+
+	//重启后第一轮：本实例只有一条失败明细
+	view.SaveRecord(ctx, url, false, 600)
+	view.SaveSelf(ctx, view.Converge(ctx, conf.Urls, conf.OfflineRound), nil)
+	view.Merge(ctx, "https://restart-peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
+		model.SelfSource: {Id: "restart-peer", Time: now, Probes: map[string]bool{url: false}, Alarms: map[string]model.Alarm{url: {StartTime: now - 600, LastSendTime: now - 60, SendCount: 2}}},
+	}})
+
+	offlines, recovers, _, _ := judgeAlarm(ctx, conf, now)
+	if len(recovers) != 0 {
+		t.Fatalf("对端还在报离线，刚重启的本实例不该发恢复，实际 %+v", recovers)
+	}
+	if len(offlines) != 0 {
+		t.Fatalf("对端刚发过告警，退避没到点不该重发，实际 %+v", offlines)
 	}
 }
