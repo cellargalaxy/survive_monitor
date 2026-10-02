@@ -77,6 +77,28 @@ func TestParseCleanUrls(t *testing.T) {
 	}
 }
 
+// 看板地址允许不填，不填就是空串、消息不带跳转；填了要去掉首尾空白，否则跳转链接打不开
+func TestParseBoardUrl(t *testing.T) {
+	ctx := util.GenCtx()
+	handler := new(ConfigHandler)
+
+	conf, err := handler.Parse(ctx, "urls:\n  - https://a/\n")
+	if err != nil {
+		t.Fatalf("应能解析: %+v", err)
+	}
+	if conf.BoardUrl != "" {
+		t.Fatalf("没填看板地址应为空，实际 %s", conf.BoardUrl)
+	}
+
+	conf, err = handler.Parse(ctx, "board_url: ' https://board/static/ '\n")
+	if err != nil {
+		t.Fatalf("应能解析: %+v", err)
+	}
+	if conf.BoardUrl != "https://board/static/" {
+		t.Fatalf("看板地址期望 https://board/static/，实际 %s", conf.BoardUrl)
+	}
+}
+
 // 退避阶梯里不为正的阶要去掉，全都不为正就回落到默认值，否则持续离线时每轮都发
 func TestParseCleanBackoff(t *testing.T) {
 	ctx := util.GenCtx()

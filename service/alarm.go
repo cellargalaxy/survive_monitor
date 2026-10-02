@@ -12,6 +12,10 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// wxTextLimit 微信模板消息正文最多这么多个字，并且不允许换行。
+// 正文只放摘要，点开消息跳到看板看全貌；完整明细写进日志，凭消息里的日志ID查
+const wxTextLimit = 20
+
 // alarmUrl 把本轮该发的离线与恢复合并成一条消息。
 // 发送成功才写回告警记录，失败就留着下一轮重新判定、重新发，这就是全部的重试逻辑
 func alarmUrl(ctx context.Context, conf model.Config) {
@@ -20,16 +24,9 @@ func alarmUrl(ctx context.Context, conf model.Config) {
 	if len(offlineTexts) == 0 && len(recoverTexts) == 0 {
 		return
 	}
-	var sections []string
-	if len(offlineTexts) > 0 {
-		sections = append(sections, fmt.Sprintf("服务离线\n%s", strings.Join(offlineTexts, "\n")))
-	}
-	if len(recoverTexts) > 0 {
-		sections = append(sections, fmt.Sprintf("服务恢复\n%s", strings.Join(recoverTexts, "\n")))
-	}
-	err := util.SendWxMsg(ctx, "", strings.Join(sections, "\n\n"))
+	err := sendWxMsg(ctx, conf, getUrlAlarmText(conf.Urls, saves, dels))
 	if err != nil {
-		logrus.WithContext(ctx).WithFields(logrus.Fields{"offline": len(offlineTexts), "recover": len(recoverTexts), "err": err}).Warn("发送服务告警，异常")
+		logrus.WithContext(ctx).WithFields(logrus.Fields{"offline": offlineTexts, "recover": recoverTexts, "err": err}).Warn("发送服务告警，异常")
 		return
 	}
 
@@ -39,7 +36,7 @@ func alarmUrl(ctx context.Context, conf model.Config) {
 	for i := range dels {
 		view.RecoverAlarm(ctx, dels[i], conf.SnapshotExpireRound)
 	}
-	logrus.WithContext(ctx).WithFields(logrus.Fields{"offline": len(offlineTexts), "recover": len(recoverTexts)}).Info("发送服务告警，完成")
+	logrus.WithContext(ctx).WithFields(logrus.Fields{"offline": offlineTexts, "recover": recoverTexts}).Info("发送服务告警，完成")
 }
 
 // judgeAlarm 决定本轮该发什么、发完要怎么写记录，不碰发送本身。
@@ -67,12 +64,14 @@ func judgeAlarm(ctx context.Context, conf model.Config, now int64) ([]string, []
 				startTime = alarm.StartTime
 				sendCount = alarm.SendCount + 1
 			}
-			offlineTexts = append(offlineTexts, fmt.Sprintf("%s (%d个实例确认，始于%s)", url, count, util.Unix2Str(ctx, util.DateLayout_2006_01_02_15_04_05, startTime, nil)))
+			offlineTexts = append(offlineTexts, fmt.Sprintf("离线 %s：%d个实例确认，始于%s，已持续%s，第%d次提醒，仍离线则%s后再提醒",
+				url, count, util.Unix2Str(ctx, util.DateLayout_2006_01_02_15_04_05, startTime, nil), getDuration(now-startTime), sendCount, getDuration(int64(getBackoff(conf.AlarmBackoffSec, sendCount)))))
 			saves[url] = model.Alarm{StartTime: startTime, LastSendTime: now, SendCount: sendCount}
 			continue
 		}
 		if online && exist {
-			recoverTexts = append(recoverTexts, fmt.Sprintf("%s (离线%s)", url, getDuration(now-alarm.StartTime)))
+			recoverTexts = append(recoverTexts, fmt.Sprintf("恢复 %s：离线%s，始于%s，共提醒%d次",
+				url, getDuration(now-alarm.StartTime), util.Unix2Str(ctx, util.DateLayout_2006_01_02_15_04_05, alarm.StartTime, nil), alarm.SendCount))
 			dels = append(dels, url)
 		}
 	}
@@ -102,13 +101,15 @@ func alarmResource(ctx context.Context, conf model.Config, resource model.Resour
 			logrus.WithContext(ctx).WithFields(logrus.Fields{"round": round, "limit": conf.ResourceRound}).Info("本机资源回落到阈值以下，尚未攒够轮数")
 			return
 		}
-		err := util.SendWxMsg(ctx, "", fmt.Sprintf("资源恢复\n%s", getResourceText(resource)))
+		detail := fmt.Sprintf("%s，超阈值%s，始于%s，共提醒%d次",
+			getResourceText(resource), getDuration(now-alarm.StartTime), util.Unix2Str(ctx, util.DateLayout_2006_01_02_15_04_05, alarm.StartTime, nil), alarm.SendCount)
+		err := sendWxMsg(ctx, conf, fmt.Sprintf("资源恢复:超阈值%s", getDuration(now-alarm.StartTime)))
 		if err != nil {
-			logrus.WithContext(ctx).WithFields(logrus.Fields{"err": err}).Warn("发送资源告警，异常")
+			logrus.WithContext(ctx).WithFields(logrus.Fields{"detail": detail, "err": err}).Warn("发送资源告警，异常")
 			return
 		}
 		view.DelResourceAlarm(ctx)
-		logrus.WithContext(ctx).WithFields(logrus.Fields{}).Info("发送资源告警，恢复完成")
+		logrus.WithContext(ctx).WithFields(logrus.Fields{"detail": detail}).Info("发送资源告警，恢复完成")
 		return
 	}
 
@@ -125,13 +126,84 @@ func alarmResource(ctx context.Context, conf model.Config, resource model.Resour
 		startTime = alarm.StartTime
 		sendCount = alarm.SendCount + 1
 	}
-	err := util.SendWxMsg(ctx, "", fmt.Sprintf("资源超阈值\n%s", strings.Join(overTexts, "\n")))
+	detail := fmt.Sprintf("%s，已持续%s，第%d次提醒，仍超阈值则%s后再提醒",
+		strings.Join(overTexts, "，"), getDuration(now-startTime), sendCount, getDuration(int64(getBackoff(conf.AlarmBackoffSec, sendCount))))
+	err := sendWxMsg(ctx, conf, getOverShort(conf, resource))
 	if err != nil {
-		logrus.WithContext(ctx).WithFields(logrus.Fields{"err": err}).Warn("发送资源告警，异常")
+		logrus.WithContext(ctx).WithFields(logrus.Fields{"detail": detail, "err": err}).Warn("发送资源告警，异常")
 		return
 	}
 	view.SaveResourceAlarm(ctx, model.Alarm{StartTime: startTime, LastSendTime: now, SendCount: sendCount})
-	logrus.WithContext(ctx).WithFields(logrus.Fields{"over": len(overTexts)}).Info("发送资源告警，完成")
+	logrus.WithContext(ctx).WithFields(logrus.Fields{"detail": detail}).Info("发送资源告警，完成")
+}
+
+// getUrlAlarmText 拼服务告警的微信正文：离线在前、恢复在后，各自列出URL，比如「离线2:a.com、b.com；恢复:c.com」。
+// 只有一个时不写个数，省下的字留给URL；超长由sendWxMsg截断，所以离线排在前面，被截掉的总是不那么要紧的恢复
+func getUrlAlarmText(urls []string, saves map[string]model.Alarm, dels []string) string {
+	//saves是map，按配置里的URL顺序取，每轮的先后才稳定
+	var offlines []string
+	for i := range urls {
+		if _, ok := saves[urls[i]]; ok {
+			offlines = append(offlines, trimUrl(urls[i]))
+		}
+	}
+	var recovers []string
+	for i := range dels {
+		recovers = append(recovers, trimUrl(dels[i]))
+	}
+	var segments []string
+	if len(offlines) > 0 {
+		segments = append(segments, getSegment("离线", offlines))
+	}
+	if len(recovers) > 0 {
+		segments = append(segments, getSegment("恢复", recovers))
+	}
+	return strings.Join(segments, "；")
+}
+
+func getSegment(title string, urls []string) string {
+	if len(urls) == 1 {
+		return fmt.Sprintf("%s:%s", title, urls[0])
+	}
+	return fmt.Sprintf("%s%d:%s", title, len(urls), strings.Join(urls, "、"))
+}
+
+// trimUrl 去掉URL的协议头和末尾的斜杠，只用在微信正文里：正文只有20个字，这两样都不提供区分度，日志里照样是完整URL
+func trimUrl(url string) string {
+	if index := strings.Index(url, "://"); index >= 0 {
+		url = url[index+3:]
+	}
+	return strings.TrimSuffix(url, "/")
+}
+
+// sendWxMsg 发微信消息。正文里的换行、连续空白压成一个空格，超过wxTextLimit个字就截断、末尾补省略号；
+// 截断按字数算而不是字节，否则中文会被从中间切开
+func sendWxMsg(ctx context.Context, conf model.Config, text string) error {
+	return util.SendWxMsg(ctx, conf.BoardUrl, limitText(text, wxTextLimit))
+}
+
+func limitText(text string, limit int) string {
+	text = strings.Join(strings.Fields(text), " ")
+	runes := []rune(text)
+	if limit <= 0 || len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit-1]) + "…"
+}
+
+// getOverShort 超阈值各项的微信正文，只列超了的项、取整，比如「超阈值:CPU95%内存92%」；三项全超、都是两位数时刚好20个字，再长由sendWxMsg截断
+func getOverShort(conf model.Config, resource model.Resource) string {
+	text := "超阈值:"
+	if percent := resource.CpuPercent(); percent >= conf.CpuUsageLimit {
+		text += fmt.Sprintf("CPU%.0f%%", percent)
+	}
+	if percent := resource.MemPercent(); percent >= conf.MemUsageLimit {
+		text += fmt.Sprintf("内存%.0f%%", percent)
+	}
+	if percent := resource.DiskPercent(); percent >= conf.DiskUsageLimit {
+		text += fmt.Sprintf("磁盘%.0f%%", percent)
+	}
+	return text
 }
 
 func getOverTexts(conf model.Config, resource model.Resource) []string {

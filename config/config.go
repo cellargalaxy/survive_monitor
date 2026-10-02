@@ -63,6 +63,7 @@ func (this *ConfigHandler) Parse(ctx context.Context, text string) (model.Config
 	}
 	fillConfig(&config)
 	config.Urls = cleanUrls(config.Urls)
+	config.BoardUrl = strings.TrimSpace(config.BoardUrl)
 
 	//首次启动时配置文件由GetDefault生成，URL列表必然为空，所以这里不能报错把服务拦死
 	if len(config.Urls) == 0 {

@@ -65,6 +65,69 @@ func TestGetOverTexts(t *testing.T) {
 	}
 }
 
+// 正文只有20个字：离线在前、恢复在后，只有一个时不写个数，URL去掉协议头和末尾斜杠，顺序与配置一致
+func TestGetUrlAlarmText(t *testing.T) {
+	urls := []string{"https://a/", "http://b:8080/x", "https://c/"}
+	saves := map[string]model.Alarm{"http://b:8080/x": {}, "https://a/": {}}
+
+	both := getUrlAlarmText(urls, saves, []string{"https://c/"})
+	if both != "离线2:a、b:8080/x；恢复:c" {
+		t.Fatalf("离线、恢复都有时文案不对，实际 %s", both)
+	}
+	only := getUrlAlarmText(urls, nil, []string{"https://c/"})
+	if only != "恢复:c" {
+		t.Fatalf("只有一个恢复时不该带个数、不该带离线，实际 %s", only)
+	}
+}
+
+// 微信正文不允许换行、最多20个字：换行要压掉，超长按字数截断补省略号，中文不能被切成乱码
+func TestLimitText(t *testing.T) {
+	if actual := limitText("离线:a\nb", 20); actual != "离线:a b" {
+		t.Errorf("换行该压成空格，实际 %q", actual)
+	}
+	if actual := limitText("一二三四五六七八九十一二三四五六七八九十", 20); actual != "一二三四五六七八九十一二三四五六七八九十" {
+		t.Errorf("正好20个字不该截断，实际 %s", actual)
+	}
+	actual := limitText("离线:s1.example.com/api/view", 20)
+	if actual != "离线:s1.example.com/a…" || len([]rune(actual)) != 20 {
+		t.Errorf("超长该截到20个字、末尾是省略号，实际 %s", actual)
+	}
+}
+
+// 超阈值正文只列超了的项、取整；三项全超、两位数时刚好20个字
+func TestGetOverShort(t *testing.T) {
+	conf := model.Config{CpuUsageLimit: 90, MemUsageLimit: 90, DiskUsageLimit: 90}
+
+	part := getOverShort(conf, model.Resource{CpuNum: 4, CpuUsage: 40, MemTotal: 100, MemUsed: 95, DiskTotal: 100, DiskUsed: 10})
+	if part != "超阈值:内存95%" {
+		t.Errorf("只有内存超阈值应只列内存，实际 %s", part)
+	}
+	all := getOverShort(conf, model.Resource{CpuNum: 2, CpuUsage: 190, MemTotal: 100, MemUsed: 92, DiskTotal: 100, DiskUsed: 91})
+	if all != "超阈值:CPU95%内存92%磁盘91%" || len([]rune(all)) > wxTextLimit {
+		t.Errorf("三项全超该都列出且不超过%d个字，实际 %s", wxTextLimit, all)
+	}
+}
+
+// 离线明细要带上确认实例数、持续多久、第几次提醒和下次提醒间隔，这些都是收到消息时判断要不要马上处理的依据
+func TestJudgeAlarmOfflineText(t *testing.T) {
+	ctx := util.GenCtx()
+	conf := model.Config{Urls: []string{"https://text/"}, SnapshotExpireRound: 5, AlarmBackoffSec: []int{300, 1800}}
+	now := int64(1700000000)
+
+	setView(t, ctx, map[string]bool{"https://text/": false}, map[string]model.Alarm{
+		"https://text/": {StartTime: now - 600, LastSendTime: now - 300, SendCount: 1},
+	})
+	offlines, _, _, _ := judgeAlarm(ctx, conf, now)
+	if len(offlines) != 1 {
+		t.Fatalf("退避到点该再发一条，实际 %d 条", len(offlines))
+	}
+	for _, want := range []string{"https://text/", "1个实例确认", "已持续10分钟", "第2次提醒", "30分钟后再提醒"} {
+		if !strings.Contains(offlines[0], want) {
+			t.Errorf("离线明细缺少「%s」，实际 %s", want, offlines[0])
+		}
+	}
+}
+
 func TestGetDuration(t *testing.T) {
 	cases := map[int64]string{-5: "0秒", 0: "0秒", 59: "59秒", 60: "1分钟", 3599: "59分钟", 3600: "1小时0分钟", 86399: "23小时59分钟", 86400: "1天0小时"}
 
