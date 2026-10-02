@@ -132,7 +132,7 @@ func getOverTexts(conf model.Config, resource model.Resource) []string {
 		texts = append(texts, fmt.Sprintf("内存 %.1f%% (阈值%.1f%%)", percent, conf.MemUsageLimit))
 	}
 	if percent := resource.DiskPercent(); percent >= conf.DiskUsageLimit {
-		texts = append(texts, fmt.Sprintf("磁盘 %.1f%% (阈值%.1f%%，路径%s)", percent, conf.DiskUsageLimit, conf.DiskPath))
+		texts = append(texts, fmt.Sprintf("磁盘 %.1f%% (阈值%.1f%%，路径%s)", percent, conf.DiskUsageLimit, resource.DiskPath))
 	}
 	return texts
 }

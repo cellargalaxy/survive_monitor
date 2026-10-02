@@ -45,9 +45,11 @@ func TestGetOverTexts(t *testing.T) {
 		t.Errorf("都没超阈值不该有文案，实际: %+v", none)
 	}
 
-	edge := getOverTexts(conf, model.Resource{CpuNum: 2, CpuUsage: 180, MemTotal: 100, MemUsed: 90, DiskTotal: 100, DiskUsed: 90})
+	edge := getOverTexts(conf, model.Resource{CpuNum: 2, CpuUsage: 180, MemTotal: 100, MemUsed: 90, DiskTotal: 100, DiskUsed: 90, DiskPath: "/data"})
 	if len(edge) != 3 {
 		t.Errorf("三项都正好卡在阈值上应全部命中，实际 %d 条: %+v", len(edge), edge)
+	} else if !strings.Contains(edge[2], "路径/data") {
+		t.Errorf("磁盘文案要带实际采集的路径，而不是配置路径，实际: %s", edge[2])
 	}
 
 	part := getOverTexts(conf, model.Resource{CpuNum: 4, CpuUsage: 40, MemTotal: 100, MemUsed: 95, DiskTotal: 100, DiskUsed: 10})
