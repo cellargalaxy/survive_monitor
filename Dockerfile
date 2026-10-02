@@ -37,9 +37,14 @@ RUN if getent group ${GID} >/dev/null 2>&1; then \
         user_name="survive_monitor"; \
         adduser -u ${UID} -G "${group_name}" -S -D -H ${user_name}; \
     fi && \
-    mkdir -p /log /resource && \
-    chown -R ${UID}:${GID} /log /resource && \
-    chmod 777 /log /resource
+    mkdir -p /log /resource /home/survive_monitor && \
+    chown -R ${UID}:${GID} /log /resource /home/survive_monitor && \
+    chmod 777 /log /resource /home/survive_monitor
+
+# 微信SDK(PowerWeChat)的access_token缓存要在$HOME/.ArtisanCloud下建文件，建不出来缓存就是nil，取token时直接空指针panic，告警一条都发不出去。
+# 上面的用户是-H建的，没有家目录，UID已存在时家目录也不一定可写，所以显式指定一个可写的HOME；
+# 只是缓存文件，丢了重启后重新取token即可，不必挂卷
+ENV HOME=/home/survive_monitor
 
 VOLUME /log
 VOLUME /resource
