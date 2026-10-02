@@ -138,7 +138,7 @@ func TestJudgeAlarmRecover(t *testing.T) {
 	}
 
 	//没发过告警就恢复，是从来没离线过，不该凭空发一条恢复
-	view.RecoverAlarm(ctx, "https://back/", now)
+	view.RecoverAlarm(ctx, "https://back/", conf.SnapshotExpireRound)
 	setView(t, ctx, map[string]bool{"https://back/": true}, nil)
 	_, recovers, _, _ = judgeAlarm(ctx, conf, now)
 	if len(recovers) != 0 {
@@ -177,7 +177,7 @@ func TestJudgeAlarmRecoverOnce(t *testing.T) {
 	if len(recovers) != 1 || len(dels) != 1 {
 		t.Fatalf("看到对端的告警记录、本实例说在线，该发一次恢复，实际 recover=%d del=%d", len(recovers), len(dels))
 	}
-	view.RecoverAlarm(ctx, url, now)
+	view.RecoverAlarm(ctx, url, conf.SnapshotExpireRound)
 
 	offlines, recovers, _, _ := judgeAlarm(ctx, conf, now+30)
 	if len(offlines) != 0 || len(recovers) != 0 {
@@ -188,5 +188,24 @@ func TestJudgeAlarmRecoverOnce(t *testing.T) {
 	_, recovers, _, _ = judgeAlarm(ctx, conf, now+230)
 	if len(recovers) != 1 {
 		t.Fatalf("对端在恢复之后开的新事件要认，该再发一次恢复，实际 %d 条", len(recovers))
+	}
+}
+
+// 别的实例已经发过恢复(交换过来的已恢复事件盖住了这条记录)，本实例不该再各发一遍
+func TestJudgeAlarmRecoverByPeer(t *testing.T) {
+	ctx := util.GenCtx()
+	url := "https://recovered-by-peer/"
+	conf := model.Config{Urls: []string{url}, SnapshotExpireRound: 5, AlarmBackoffSec: []int{300}}
+	now := int64(1700000000)
+
+	setView(t, ctx, map[string]bool{url: true}, map[string]model.Alarm{
+		url: {StartTime: now - 600, LastSendTime: now - 60, SendCount: 2},
+	})
+	view.Merge(ctx, "https://recover-sender/api/view", model.View{Snapshots: map[string]model.Snapshot{
+		model.SelfSource: {Id: "recover-sender", Time: now, Probes: map[string]bool{url: true}, Recovers: map[string]int64{url: now - 600}},
+	}})
+	offlines, recovers, _, _ := judgeAlarm(ctx, conf, now)
+	if len(offlines) != 0 || len(recovers) != 0 {
+		t.Fatalf("对端已经发过恢复，本实例不该再发，实际 offline=%d recover=%d", len(offlines), len(recovers))
 	}
 }

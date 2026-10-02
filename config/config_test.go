@@ -63,6 +63,20 @@ func TestParseFillDefault(t *testing.T) {
 	}
 }
 
+// 空项、重复项、首尾空白都要在加载时洗掉，否则重复的URL一轮探两次、空项每轮凭空报离线
+func TestParseCleanUrls(t *testing.T) {
+	ctx := util.GenCtx()
+	handler := new(ConfigHandler)
+
+	conf, err := handler.Parse(ctx, "urls:\n  - https://a/\n  - ' https://b/ '\n  - ''\n  - https://a/\n")
+	if err != nil {
+		t.Fatalf("应能解析: %+v", err)
+	}
+	if len(conf.Urls) != 2 || conf.Urls[0] != "https://a/" || conf.Urls[1] != "https://b/" {
+		t.Fatalf("URL期望 [https://a/ https://b/]，实际 %+v", conf.Urls)
+	}
+}
+
 func TestParseIllegal(t *testing.T) {
 	ctx := util.GenCtx()
 	handler := new(ConfigHandler)

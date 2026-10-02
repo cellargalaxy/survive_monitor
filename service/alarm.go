@@ -37,7 +37,7 @@ func alarmUrl(ctx context.Context, conf model.Config) {
 		view.SaveAlarm(ctx, url, saves[url])
 	}
 	for i := range dels {
-		view.RecoverAlarm(ctx, dels[i], now)
+		view.RecoverAlarm(ctx, dels[i], conf.SnapshotExpireRound)
 	}
 	logrus.WithContext(ctx).WithFields(logrus.Fields{"offline": len(offlineTexts), "recover": len(recoverTexts)}).Info("发送服务告警，完成")
 }

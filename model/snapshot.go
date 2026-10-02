@@ -11,6 +11,7 @@ type Snapshot struct {
 	Probes        map[string]bool  `json:"probes"`         //URL -> 本实例是否认为它在线，已经是连续多轮收敛后的结论
 	Resource      *Resource        `json:"resource"`       //本机资源，采集不到为空
 	Alarms        map[string]Alarm `json:"alarms"`         //URL -> 离线告警发送记录
+	Recovers      map[string]int64 `json:"recovers"`       //URL -> 本实例发过恢复通知的事件的起始时间；起始时间不晚于它的告警记录都是已恢复的旧事件，任何实例都不再据此告警或恢复
 	ResourceAlarm *Alarm           `json:"resource_alarm"` //本机资源告警发送记录
 }
 

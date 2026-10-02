@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"strings"
 
 	"github.com/cellargalaxy/go_common/util"
 	"github.com/cellargalaxy/survive_monitor/model"
@@ -61,6 +62,7 @@ func (this *ConfigHandler) Parse(ctx context.Context, text string) (model.Config
 		return config, err
 	}
 	fillConfig(&config)
+	config.Urls = cleanUrls(config.Urls)
 
 	//首次启动时配置文件由GetDefault生成，URL列表必然为空，所以这里不能报错把服务拦死
 	if len(config.Urls) == 0 {
@@ -104,4 +106,20 @@ func fillConfig(config *model.Config) {
 	if config.ResourceRound <= 0 {
 		config.ResourceRound = resourceRound
 	}
+}
+
+// cleanUrls 去掉首尾空白、空项与重复项，保持原有顺序。
+// 重复的URL每轮会被探两次，明细攒得快一倍，连续失败轮数就名不副实，告警文案里也会列两遍；空项则每轮必然探测失败，凭空报一条离线
+func cleanUrls(urls []string) []string {
+	exist := make(map[string]bool, len(urls))
+	list := make([]string, 0, len(urls))
+	for i := range urls {
+		url := strings.TrimSpace(urls[i])
+		if url == "" || exist[url] {
+			continue
+		}
+		exist[url] = true
+		list = append(list, url)
+	}
+	return list
 }

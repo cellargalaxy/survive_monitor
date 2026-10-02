@@ -256,4 +256,10 @@ func TestMonitorExpireRound(t *testing.T) {
 	if exist() {
 		t.Fatalf("连续2轮没拿到新数据，对端快照该过期")
 	}
+	//过期清掉之后对端还在返回同一份旧快照，不许被当成新数据收回来，过期一轮又复活一轮
+	monitor(ctx, conf)
+	monitor(ctx, conf)
+	if exist() {
+		t.Fatalf("过期之后再拉到同一份旧快照，不该复活")
+	}
 }

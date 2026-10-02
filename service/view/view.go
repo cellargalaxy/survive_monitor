@@ -21,14 +21,15 @@ var peerSnapshots = make(map[string]model.Snapshot)
 // 「新数据」只认原始产生时间更新的快照，单纯又拉到一份同样的旧快照不算，否则实例之间来回转发一份挂掉实例的旧快照能把它永远续命
 var peerRounds = make(map[string]int64)
 
+// expiredTimes 身份键 -> 已经过期出局的快照的原始产生时间。过期快照的内容可以清掉，产生时间得留着：
+// 别的实例还没数到过期、转发回来的，或者卡住的对端一直返回的，都还是那份旧快照，
+// 不记着它的产生时间，清掉之后再拉到就会被当成新数据收进来，过期一轮又复活一轮，挂掉实例的旧结论就永远在分母里投票。
+// 只有身份键这么几条，不清理
+var expiredTimes = make(map[string]int64)
+
 // round 本实例当前是第几轮，每轮开头由NextRound加一
 var round int64
 var records = make(map[string][]model.Record)
-
-// recoveredTimes URL -> 本实例发出恢复通知的时间。只留在本机、不进交换载荷。
-// 对端的告警记录只有对端自己能删，对端看不到本实例的结论时(比如它探不到本实例)会一直留着那条记录；
-// 本实例发完恢复后，起始时间不晚于恢复时间的记录一律当作已恢复的旧事件，否则每轮都会据此再发一遍恢复
-var recoveredTimes = make(map[string]int64)
 
 // resourceOver、resourceRound 本机资源当前是否超阈值，以及这个状态已经连续了几轮
 var resourceOver bool
@@ -88,7 +89,7 @@ func Merge(ctx context.Context, source string, view model.View) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	merge(ctx, peerSnapshots, peerRounds, round, selfId, source, view)
+	merge(ctx, peerSnapshots, peerRounds, expiredTimes, round, selfId, source, view)
 }
 
 // Judge 判定某个URL。offline要全部有新鲜结论的实例一致说离线，online只要任一实例说在线，
@@ -101,16 +102,17 @@ func Judge(ctx context.Context, url string, expireRound int) (bool, bool, int) {
 }
 
 // GetAlarm 取全局最新的离线告警记录。自己的和对端的一起看，对端已经发过就轮不到自己再发；
-// 本实例已经发过恢复的旧事件不算，见recoveredTimes
+// 任一实例已经发过恢复的旧事件不算，见Snapshot.Recovers
 func GetAlarm(ctx context.Context, url string, expireRound int) (model.Alarm, bool) {
 	lock.RLock()
 	defer lock.RUnlock()
 
 	var newest model.Alarm
 	var exist bool
-	for _, snapshot := range snapshotList(expireRound) {
+	list := snapshotList(expireRound)
+	for _, snapshot := range list {
 		alarm, ok := snapshot.Alarms[url]
-		if !ok || recovered(url, alarm) {
+		if !ok || recovered(list, url, alarm) {
 			continue
 		}
 		if !exist || alarm.LastSendTime > newest.LastSendTime {
@@ -132,13 +134,32 @@ func SaveAlarm(ctx context.Context, url string, alarm model.Alarm) {
 	selfSnapshot.Alarms = alarms
 }
 
-// RecoverAlarm 发完恢复之后调用：删掉本实例的告警记录，并记下恢复时间，对端还留着的同一事件的记录从此不再认
-func RecoverAlarm(ctx context.Context, url string, now int64) {
+// RecoverAlarm 发完恢复之后调用：删掉本实例的告警记录，并把已恢复事件的起始时间记进自己的快照交换出去，
+// 各实例还留着的同一事件的记录从此都不再认，免得每个看到过告警记录的实例都各发一遍恢复。
+// 记的是当前还认的记录里最晚的起始时间：实例之间没同步上时同一事件可能被各自首发过，起始时间各不相同，要一起盖住
+func RecoverAlarm(ctx context.Context, url string, expireRound int) {
 	lock.Lock()
 	defer lock.Unlock()
 
+	list := snapshotList(expireRound)
+	startTime, exist := selfSnapshot.Recovers[url]
+	for i := range list {
+		alarm, ok := list[i].Alarms[url]
+		if !ok || recovered(list, url, alarm) {
+			continue
+		}
+		if !exist || alarm.StartTime > startTime {
+			startTime = alarm.StartTime
+			exist = true
+		}
+	}
 	delAlarm(url)
-	recoveredTimes[url] = now
+	if !exist {
+		return
+	}
+	recovers := cloneTimes(selfSnapshot.Recovers)
+	recovers[url] = startTime
+	selfSnapshot.Recovers = recovers
 }
 
 // GetResourceAlarm 资源告警只看本机记录。资源是各实例自己采的，也就只有自己有资格判它持续超了多久
@@ -202,7 +223,8 @@ func GetStatus(ctx context.Context, expireRound, windowSec int) model.Status {
 	return model.Status{View: getView(expireRound), Bars: bars}
 }
 
-// Clean 清掉过期快照、窗口外明细，以及已经从配置里删掉的URL留下的明细和告警记录。
+// Clean 清掉过期快照(产生时间留作记录，见expiredTimes)、窗口外明细、已经从配置里删掉的URL留下的明细和告警记录，
+// 以及别的实例已经发过恢复的告警记录。
 // 判定时本来就会跳过过期数据，这里是别让内存一直涨，也别让删掉的URL的旧告警记录一直被交换出去，
 // 哪天重新加回来时还被当成同一事件续上退避
 func Clean(ctx context.Context, urls []string, expireRound, windowSec int) {
@@ -217,6 +239,7 @@ func Clean(ctx context.Context, urls []string, expireRound, windowSec int) {
 	now := time.Now().Unix()
 	for source := range peerSnapshots {
 		if expire(peerRounds[source], round, expireRound) {
+			expiredTimes[source] = peerSnapshots[source].Time
 			delete(peerSnapshots, source)
 			delete(peerRounds, source)
 		}
@@ -229,23 +252,26 @@ func Clean(ctx context.Context, urls []string, expireRound, windowSec int) {
 		}
 		records[url] = list
 	}
-	for url := range selfSnapshot.Alarms {
-		if !configured[url] {
+	list := snapshotList(expireRound)
+	for url, alarm := range selfSnapshot.Alarms {
+		if !configured[url] || recovered(list, url, alarm) {
 			delAlarm(url)
 		}
 	}
-	//恢复时间只是用来压住对端的旧记录，没有任何新鲜快照还带着这类旧记录了，它也就没用了
-	list := snapshotList(expireRound)
-	for url := range recoveredTimes {
+	//已恢复事件的起始时间只是用来压住各实例还没删的旧记录，没有任何新鲜快照还带着这类旧记录了，它也就没用了
+	list = snapshotList(expireRound)
+	for url, startTime := range selfSnapshot.Recovers {
 		stale := false
 		for i := range list {
-			if alarm, ok := list[i].Alarms[url]; ok && recovered(url, alarm) {
+			if alarm, ok := list[i].Alarms[url]; ok && alarm.StartTime <= startTime {
 				stale = true
 				break
 			}
 		}
 		if !stale {
-			delete(recoveredTimes, url)
+			recovers := cloneTimes(selfSnapshot.Recovers)
+			delete(recovers, url)
+			selfSnapshot.Recovers = recovers
 		}
 	}
 }
@@ -268,10 +294,22 @@ func cloneAlarms(alarms map[string]model.Alarm) map[string]model.Alarm {
 	return cloned
 }
 
-// recovered 这条告警记录是不是本实例已经发过恢复的旧事件。调用方必须已经持有锁
-func recovered(url string, alarm model.Alarm) bool {
-	recoverTime, ok := recoveredTimes[url]
-	return ok && alarm.StartTime <= recoverTime
+func cloneTimes(times map[string]int64) map[string]int64 {
+	cloned := make(map[string]int64, len(times)+1)
+	for url, value := range times {
+		cloned[url] = value
+	}
+	return cloned
+}
+
+// recovered 这条告警记录是不是list里任一实例已经发过恢复的旧事件
+func recovered(list []model.Snapshot, url string, alarm model.Alarm) bool {
+	for i := range list {
+		if startTime, ok := list[i].Recovers[url]; ok && alarm.StartTime <= startTime {
+			return true
+		}
+	}
+	return false
 }
 
 // buildBar 把一个URL的明细按窗口等分成barSlotCount格。一格里只要有一次失败就标失败，宁可显眼也不要把抖动藏起来
@@ -326,8 +364,9 @@ func converge(list []model.Record, offlineRound int) bool {
 	return false
 }
 
-// merge 合并的纯逻辑。只有拿到原始产生时间更新的快照，才在rounds里把该身份键记成本轮拿到了新数据
-func merge(ctx context.Context, peers map[string]model.Snapshot, rounds map[string]int64, current int64, selfId, source string, view model.View) {
+// merge 合并的纯逻辑。只有拿到原始产生时间更新的快照，才在rounds里把该身份键记成本轮拿到了新数据；
+// 已经过期出局的身份键，也要比出局时那份更新才收，见expiredTimes
+func merge(ctx context.Context, peers map[string]model.Snapshot, rounds, expired map[string]int64, current int64, selfId, source string, view model.View) {
 	for key, snapshot := range view.Snapshots {
 		if key == model.SelfSource {
 			//对端自己那条的身份键是空的，回填成「我从哪个URL拿到的」
@@ -346,8 +385,12 @@ func merge(ctx context.Context, peers map[string]model.Snapshot, rounds map[stri
 		if ok && old.Time >= snapshot.Time {
 			continue
 		}
+		if expiredTime, ok := expired[key]; ok && expiredTime >= snapshot.Time {
+			continue
+		}
 		peers[key] = snapshot
 		rounds[key] = current
+		delete(expired, key)
 	}
 	logrus.WithContext(ctx).WithFields(logrus.Fields{"source": source, "len": len(peers)}).Info("合并全局视图")
 }

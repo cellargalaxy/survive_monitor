@@ -3,6 +3,7 @@ package view
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/cellargalaxy/go_common/util"
 	"github.com/cellargalaxy/survive_monitor/model"
@@ -88,7 +89,7 @@ func TestConverge(t *testing.T) {
 func TestMergeFillSource(t *testing.T) {
 	ctx := util.GenCtx()
 	peers := make(map[string]model.Snapshot)
-	merge(ctx, peers, make(map[string]int64), 1, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
+	merge(ctx, peers, make(map[string]int64), make(map[string]int64), 1, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
 		model.SelfSource: {Id: "peer-id", Time: 100, Probes: map[string]bool{"url": true}},
 	}})
 
@@ -107,7 +108,7 @@ func TestMergeFillSource(t *testing.T) {
 func TestMergeDropSelf(t *testing.T) {
 	ctx := util.GenCtx()
 	peers := make(map[string]model.Snapshot)
-	merge(ctx, peers, make(map[string]int64), 1, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
+	merge(ctx, peers, make(map[string]int64), make(map[string]int64), 1, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
 		"https://me/api/view":    {Id: "my-id", Time: 100, Probes: map[string]bool{"url": true}},
 		"https://other/api/view": {Id: "other-id", Time: 100, Probes: map[string]bool{"url": true}},
 	}})
@@ -125,7 +126,7 @@ func TestMergeKeepNewer(t *testing.T) {
 	peers := map[string]model.Snapshot{
 		"https://peer/api/view": {Id: "peer-id", Time: 200, Probes: map[string]bool{"url": false}},
 	}
-	merge(ctx, peers, make(map[string]int64), 1, "my-id", "https://relay/api/view", model.View{Snapshots: map[string]model.Snapshot{
+	merge(ctx, peers, make(map[string]int64), make(map[string]int64), 1, "my-id", "https://relay/api/view", model.View{Snapshots: map[string]model.Snapshot{
 		"https://peer/api/view": {Id: "peer-id", Time: 100, Probes: map[string]bool{"url": true}},
 	}})
 
@@ -133,7 +134,7 @@ func TestMergeKeepNewer(t *testing.T) {
 		t.Fatalf("旧数据不许盖掉新数据，期望 time=200，实际 %d", peers["https://peer/api/view"].Time)
 	}
 
-	merge(ctx, peers, make(map[string]int64), 1, "my-id", "https://relay/api/view", model.View{Snapshots: map[string]model.Snapshot{
+	merge(ctx, peers, make(map[string]int64), make(map[string]int64), 1, "my-id", "https://relay/api/view", model.View{Snapshots: map[string]model.Snapshot{
 		"https://peer/api/view": {Id: "peer-id", Time: 300, Probes: map[string]bool{"url": true}},
 	}})
 	if peers["https://peer/api/view"].Time != 300 {
@@ -194,21 +195,21 @@ func TestMergeRefreshRound(t *testing.T) {
 	peers := make(map[string]model.Snapshot)
 	rounds := make(map[string]int64)
 
-	merge(ctx, peers, rounds, 1, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
+	merge(ctx, peers, rounds, make(map[string]int64), 1, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
 		model.SelfSource: {Id: "peer-id", Time: 100},
 	}})
 	if rounds["https://peer/api/view"] != 1 {
 		t.Fatalf("第1轮拿到新数据，期望记成1，实际 %d", rounds["https://peer/api/view"])
 	}
 
-	merge(ctx, peers, rounds, 2, "my-id", "https://relay/api/view", model.View{Snapshots: map[string]model.Snapshot{
+	merge(ctx, peers, rounds, make(map[string]int64), 2, "my-id", "https://relay/api/view", model.View{Snapshots: map[string]model.Snapshot{
 		"https://peer/api/view": {Id: "peer-id", Time: 100},
 	}})
 	if rounds["https://peer/api/view"] != 1 {
 		t.Fatalf("同一份旧快照被转发回来不算新数据，期望仍是1，实际 %d", rounds["https://peer/api/view"])
 	}
 
-	merge(ctx, peers, rounds, 3, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
+	merge(ctx, peers, rounds, make(map[string]int64), 3, "my-id", "https://peer/api/view", model.View{Snapshots: map[string]model.Snapshot{
 		model.SelfSource: {Id: "peer-id", Time: 130},
 	}})
 	if rounds["https://peer/api/view"] != 3 {
@@ -274,7 +275,7 @@ func TestSaveAlarmCopyOnWrite(t *testing.T) {
 	before := GetView(ctx, 5).Snapshots[model.SelfSource].Alarms
 
 	SaveAlarm(ctx, "https://cow/b", model.Alarm{StartTime: 2})
-	RecoverAlarm(ctx, "https://cow/a", 10)
+	RecoverAlarm(ctx, "https://cow/a", 5)
 	if _, ok := before["https://cow/b"]; ok {
 		t.Fatalf("已经交出去的map不许被原地新增")
 	}
@@ -337,7 +338,8 @@ func TestCleanUnconfigured(t *testing.T) {
 	SaveRecord(ctx, "https://drop/", true, 600)
 	SaveAlarm(ctx, "https://keep/", model.Alarm{StartTime: 1})
 	SaveAlarm(ctx, "https://drop/", model.Alarm{StartTime: 1})
-	RecoverAlarm(ctx, "https://gone/", 10)
+	SaveAlarm(ctx, "https://gone/", model.Alarm{StartTime: 1})
+	RecoverAlarm(ctx, "https://gone/", 5)
 
 	Clean(ctx, []string{"https://keep/"}, 5, 600)
 
@@ -355,7 +357,90 @@ func TestCleanUnconfigured(t *testing.T) {
 	if _, ok := selfSnapshot.Alarms["https://keep/"]; !ok {
 		t.Errorf("还在配置里的URL的告警记录不该清掉")
 	}
-	if _, ok := recoveredTimes["https://gone/"]; ok {
-		t.Errorf("没有旧记录可压的恢复时间该清掉")
+	if _, ok := selfSnapshot.Recovers["https://gone/"]; ok {
+		t.Errorf("没有旧记录可压的已恢复事件该清掉")
+	}
+}
+
+// 过期出局的快照，清掉之后再拉到同一份旧快照(别的实例转发回来，或者卡住的对端一直返回)也不许复活，
+// 否则挂掉实例的旧结论过期一轮又复活一轮，一直在分母里投票；比出局时那份更新的照常收
+func TestMergeExpiredNotRevive(t *testing.T) {
+	ctx := util.GenCtx()
+	peers := make(map[string]model.Snapshot)
+	rounds := make(map[string]int64)
+	expired := map[string]int64{"https://dead/api/view": 100}
+
+	merge(ctx, peers, rounds, expired, 10, "my-id", "https://relay/api/view", model.View{Snapshots: map[string]model.Snapshot{
+		"https://dead/api/view": {Id: "dead-id", Time: 100},
+	}})
+	if _, ok := peers["https://dead/api/view"]; ok {
+		t.Fatalf("出局时那份旧快照不许复活: %+v", peers)
+	}
+
+	merge(ctx, peers, rounds, expired, 11, "my-id", "https://dead/api/view", model.View{Snapshots: map[string]model.Snapshot{
+		model.SelfSource: {Id: "dead-id", Time: 101},
+	}})
+	if peers["https://dead/api/view"].Time != 101 || rounds["https://dead/api/view"] != 11 {
+		t.Fatalf("比出局时更新的快照该收，实际 %+v %+v", peers, rounds)
+	}
+	if _, ok := expired["https://dead/api/view"]; ok {
+		t.Fatalf("重新收进来之后出局记录该删掉")
+	}
+}
+
+// 卡住的对端一直返回同一份旧快照：过期之后要一直出局，不能隔几轮复活一次
+func TestCleanExpiredNotRevive(t *testing.T) {
+	ctx := util.GenCtx()
+	stuck := model.View{Snapshots: map[string]model.Snapshot{model.SelfSource: {Id: "stuck-id", Time: 100}}}
+	fresh := func() bool {
+		lock.RLock()
+		defer lock.RUnlock()
+		_, ok := getView(2).Snapshots["https://stuck/api/view"]
+		return ok
+	}
+
+	for i := 0; i < 8; i++ {
+		NextRound(ctx)
+		Merge(ctx, "https://stuck/api/view", stuck)
+		Clean(ctx, nil, 2, 600)
+		if expect := i < 2; fresh() != expect {
+			t.Fatalf("第 %d 轮期望新鲜=%v，实际 %v", i, expect, fresh())
+		}
+	}
+}
+
+// 别的实例发过恢复，本实例还留着的同一事件的记录不再认，并且要在清理时删掉；
+// 同一事件被各自首发过、起始时间不同时，恢复要一起盖住
+func TestRecoverAlarmExchange(t *testing.T) {
+	ctx := util.GenCtx()
+	url := "https://exchange/"
+	SaveAlarm(ctx, url, model.Alarm{StartTime: 100, LastSendTime: 500, SendCount: 3})
+	Merge(ctx, "https://other-sender/api/view", model.View{Snapshots: map[string]model.Snapshot{
+		model.SelfSource: {Id: "other-sender", Time: time.Now().Unix(), Alarms: map[string]model.Alarm{url: {StartTime: 110, LastSendTime: 110, SendCount: 1}}},
+	}})
+	RecoverAlarm(ctx, url, 5)
+	if startTime := GetView(ctx, 5).Snapshots[model.SelfSource].Recovers[url]; startTime != 110 {
+		t.Fatalf("已恢复事件该取最晚的起始时间，期望 110，实际 %d", startTime)
+	}
+	if _, exist := GetAlarm(ctx, url, 5); exist {
+		t.Fatalf("发过恢复之后，各实例同一事件的记录都不该再认")
+	}
+
+	other := "https://exchange-peer/"
+	SaveAlarm(ctx, other, model.Alarm{StartTime: 200, LastSendTime: 200, SendCount: 1})
+	Merge(ctx, "https://peer-recover/api/view", model.View{Snapshots: map[string]model.Snapshot{
+		model.SelfSource: {Id: "peer-recover", Time: time.Now().Unix(), Recovers: map[string]int64{other: 200}},
+	}})
+	if _, exist := GetAlarm(ctx, other, 5); exist {
+		t.Fatalf("对端已经发过恢复，自己那条同一事件的记录不该再认")
+	}
+	Clean(ctx, []string{url, other}, 5, 600)
+	if _, ok := GetView(ctx, 5).Snapshots[model.SelfSource].Alarms[other]; ok {
+		t.Fatalf("对端已经发过恢复，自己那条同一事件的记录该清掉")
+	}
+
+	SaveAlarm(ctx, other, model.Alarm{StartTime: 201, LastSendTime: 201, SendCount: 1})
+	if _, exist := GetAlarm(ctx, other, 5); !exist {
+		t.Fatalf("恢复之后再开的新事件要认")
 	}
 }

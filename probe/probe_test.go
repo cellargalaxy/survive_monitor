@@ -29,6 +29,7 @@ func TestParseViewRoundTrip(t *testing.T) {
 			Probes:        map[string]bool{"https://a/": true, "https://b/": false},
 			Resource:      &resource,
 			Alarms:        map[string]model.Alarm{"https://b/": {StartTime: 1700000000, LastSendTime: 1700000001, SendCount: 2}},
+			Recovers:      map[string]int64{"https://c/": 1699990000},
 			ResourceAlarm: &model.Alarm{StartTime: 1699999999, LastSendTime: 1700000000, SendCount: 1},
 		},
 		"https://peer/api/view": {

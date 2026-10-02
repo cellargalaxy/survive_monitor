@@ -279,10 +279,18 @@
         }
         if (row.result.count) tags += '<span class="tag">' + row.result.count + '个实例结论</span>';
 
+        // 口径与后端一致：任一实例发过恢复的事件，起始时间不晚于它的告警记录都是已恢复的旧事件，不再标告警
+        var recoverStart = -1;
+        for (var recoverKey in snapshots) {
+          var recovers = snapshots[recoverKey].recovers || {};
+          if (row.url in recovers && recovers[row.url] > recoverStart) recoverStart = recovers[row.url];
+        }
         var alarm = null;
         for (var sourceKey in snapshots) {
           var alarms = snapshots[sourceKey].alarms || {};
-          if (alarms[row.url] && (!alarm || alarms[row.url].last_send_time > alarm.last_send_time)) alarm = alarms[row.url];
+          var one = alarms[row.url];
+          if (!one || one.start_time <= recoverStart) continue;
+          if (!alarm || one.last_send_time > alarm.last_send_time) alarm = one;
         }
         if (alarm) tags += '<span class="tag alarm">已告警 · 离线' + formatDuration(now - alarm.start_time) + '</span>';
 
