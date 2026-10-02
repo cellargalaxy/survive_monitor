@@ -7,7 +7,7 @@ const SelfSource = ""
 type Snapshot struct {
 	Id            string           `json:"id"`             //实例标识，启动时生成；用来认出被对端转发回来的自己，否则同一份观测会在判定分母里投两票
 	Source        string           `json:"source"`         //身份键，见SelfSource
-	Time          int64            `json:"time"`           //原始产生时间，秒级；转发链路上只读不改，否则挂掉实例的旧结论会永远新鲜
+	Time          int64            `json:"time"`           //原始产生时间，秒级；本实例的快照内容每变一次就严格递增一次，转发链路上只读不改，否则挂掉实例的旧结论会永远新鲜
 	Probes        map[string]bool  `json:"probes"`         //URL -> 本实例是否认为它在线，已经是连续多轮收敛后的结论
 	Resource      *Resource        `json:"resource"`       //本机资源，采集不到为空
 	Alarms        map[string]Alarm `json:"alarms"`         //URL -> 离线告警发送记录

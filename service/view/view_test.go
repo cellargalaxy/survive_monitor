@@ -293,6 +293,40 @@ func TestSaveAlarmCopyOnWrite(t *testing.T) {
 	}
 }
 
+// 落完快照之后才写的告警、恢复记录也要推进产生时间，否则本轮已经拉过一次的对端会把新内容当成同一份旧快照丢掉
+func TestTouchSelf(t *testing.T) {
+	ctx := util.GenCtx()
+	SaveSelf(ctx, map[string]bool{}, nil)
+	pulled := GetView(ctx, 5)
+
+	peers := make(map[string]model.Snapshot)
+	rounds := make(map[string]int64)
+	merge(ctx, peers, rounds, make(map[string]int64), 1, "other-self", "https://me/api/view", pulled)
+
+	//同一秒里连写，时间戳也得严格递增
+	SaveAlarm(ctx, "https://touch/", model.Alarm{StartTime: 1, LastSendTime: 1, SendCount: 1})
+	afterSave := GetView(ctx, 5)
+	if afterSave.Snapshots[model.SelfSource].Time <= pulled.Snapshots[model.SelfSource].Time {
+		t.Fatalf("写告警记录该推进产生时间，前 %d 后 %d", pulled.Snapshots[model.SelfSource].Time, afterSave.Snapshots[model.SelfSource].Time)
+	}
+	merge(ctx, peers, rounds, make(map[string]int64), 2, "other-self", "https://me/api/view", afterSave)
+	if _, ok := peers["https://me/api/view"].Alarms["https://touch/"]; !ok {
+		t.Fatalf("对端该收下带告警记录的新快照")
+	}
+
+	RecoverAlarm(ctx, "https://touch/", 5)
+	afterRecover := GetView(ctx, 5)
+	if afterRecover.Snapshots[model.SelfSource].Time <= afterSave.Snapshots[model.SelfSource].Time {
+		t.Fatalf("写恢复记录该推进产生时间，前 %d 后 %d", afterSave.Snapshots[model.SelfSource].Time, afterRecover.Snapshots[model.SelfSource].Time)
+	}
+
+	//推出去的时间不许被下一轮落快照拉回来，否则对端会把下一轮的快照当旧的丢掉
+	SaveSelf(ctx, map[string]bool{}, nil)
+	if next := GetView(ctx, 5).Snapshots[model.SelfSource].Time; next <= afterRecover.Snapshots[model.SelfSource].Time {
+		t.Fatalf("落快照也要严格递增，前 %d 后 %d", afterRecover.Snapshots[model.SelfSource].Time, next)
+	}
+}
+
 // 告警与恢复都要连续攒轮数，状态一翻转就从1重新数
 func TestMarkResourceOver(t *testing.T) {
 	ctx := util.GenCtx()

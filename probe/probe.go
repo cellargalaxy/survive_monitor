@@ -3,6 +3,7 @@ package probe
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -13,17 +14,25 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// maxBodySize 响应体最多读这么多。判活只看响应码，响应体只用来认领全局视图，视图也就几KB到几十KB；
+// 不设上限的话，探到一个大文件下载地址就是每轮整个下下来，既占内存又给被探测的服务添压力
+const maxBodySize = 4 << 20
+
 var clientLock = &sync.RWMutex{}
 var clients = make(map[time.Duration]*resty.Client)
 
 // Probe 探测单个URL。alive是该URL是否存活；view非空说明响应体解析出了本服务的全局视图，可以合并
 func Probe(ctx context.Context, url string, timeout time.Duration) (bool, *model.View) {
-	response, err := getClient(ctx, timeout).R().SetContext(ctx).Get(url)
+	//不让resty自己读响应体，它会不设上限地整个读进内存，改由这里限量读
+	response, err := getClient(ctx, timeout).R().SetContext(ctx).SetDoNotParseResponse(true).Get(url)
+	if response != nil && response.RawBody() != nil {
+		defer response.RawBody().Close()
+	}
 	if err != nil {
 		logrus.WithContext(ctx).WithFields(logrus.Fields{"url": url, "err": err}).Warn("探测URL，请求异常")
 		return false, nil
 	}
-	if response == nil {
+	if response == nil || response.RawBody() == nil {
 		logrus.WithContext(ctx).WithFields(logrus.Fields{"url": url}).Warn("探测URL，响应为空")
 		return false, nil
 	}
@@ -34,7 +43,14 @@ func Probe(ctx context.Context, url string, timeout time.Duration) (bool, *model
 		return false, nil
 	}
 
-	view, ok := ParseView(ctx, response.Body())
+	//读响应体也算在单次超时里，读不完(超时、连接中断)跟原来交给resty读时一样按失败计；读到上限就截断，截断的解析不出视图，当普通URL
+	data, err := io.ReadAll(io.LimitReader(response.RawBody(), maxBodySize))
+	if err != nil {
+		logrus.WithContext(ctx).WithFields(logrus.Fields{"url": url, "statusCode": statusCode, "err": err}).Warn("探测URL，读取响应体异常")
+		return false, nil
+	}
+
+	view, ok := ParseView(ctx, data)
 	if !ok {
 		logrus.WithContext(ctx).WithFields(logrus.Fields{"url": url, "statusCode": statusCode}).Info("探测URL，响应")
 		return true, nil

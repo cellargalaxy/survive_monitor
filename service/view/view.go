@@ -69,12 +69,12 @@ func Converge(ctx context.Context, urls []string, offlineRound int) map[string]b
 	return probes
 }
 
-// SaveSelf 落本实例本轮的快照。时间戳在这里写一次，之后被对端转发也不会被刷新
+// SaveSelf 落本实例本轮的快照。时间戳只由本实例推进，之后被对端转发也不会被刷新
 func SaveSelf(ctx context.Context, probes map[string]bool, resource *model.Resource) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	selfSnapshot.Time = time.Now().Unix()
+	touchSelf()
 	selfSnapshot.Probes = probes
 	selfSnapshot.Resource = resource
 }
@@ -136,6 +136,7 @@ func SaveAlarm(ctx context.Context, url string, alarm model.Alarm) {
 	alarms := cloneAlarms(selfSnapshot.Alarms)
 	alarms[url] = alarm
 	selfSnapshot.Alarms = alarms
+	touchSelf()
 }
 
 // RecoverAlarm 发完恢复之后调用：删掉本实例的告警记录，并把已恢复事件的起始时间记进自己的快照交换出去，
@@ -158,6 +159,7 @@ func RecoverAlarm(ctx context.Context, url string, expireRound int) {
 		}
 	}
 	delAlarm(url)
+	touchSelf()
 	if !exist {
 		return
 	}
@@ -278,6 +280,19 @@ func Clean(ctx context.Context, urls []string, expireRound, windowSec int) {
 			selfSnapshot.Recovers = recovers
 		}
 	}
+}
+
+// touchSelf 推进自己快照的产生时间，严格递增。对端只收产生时间更新的快照(见merge)，
+// 落完快照之后才写的告警记录、恢复记录要是不推进时间，本轮已经拉过一次的对端会把它当成同一份旧快照丢掉，
+// 得等下一轮落快照才看得到，这期间它照样会把同一事件的告警或恢复再发一遍。
+// 时间戳是秒级的，同一秒里写两次也要往前推一秒；轮次之间至少隔着探测间隔，推出去的这一秒很快就被追平。
+// 调用方必须已经持有锁
+func touchSelf() {
+	now := time.Now().Unix()
+	if now <= selfSnapshot.Time {
+		now = selfSnapshot.Time + 1
+	}
+	selfSnapshot.Time = now
 }
 
 // delAlarm 删本实例的告警记录，同样写时复制，见SaveAlarm。调用方必须已经持有锁

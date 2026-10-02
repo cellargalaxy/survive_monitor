@@ -68,6 +68,9 @@ func (this *ConfigHandler) Parse(ctx context.Context, text string) (model.Config
 	if len(config.Urls) == 0 {
 		logrus.WithContext(ctx).WithFields(logrus.Fields{}).Warn("加载配置，URL列表为空")
 	}
+	if expireRoundTooSmall(config) {
+		logrus.WithContext(ctx).WithFields(logrus.Fields{"snapshotExpireRound": config.SnapshotExpireRound, "probeIntervalSec": config.ProbeIntervalSec, "probeTimeoutSec": config.ProbeTimeoutSec}).Warn("加载配置，快照过期轮数偏小，对端探测变慢时会被误判过期")
+	}
 	logrus.WithContext(ctx).WithFields(logrus.Fields{"config": config}).Info("加载配置")
 	return config, nil
 }
@@ -107,6 +110,13 @@ func fillConfig(config *model.Config) {
 	if config.ResourceRound <= 0 {
 		config.ResourceRound = resourceRound
 	}
+}
+
+// expireRoundTooSmall 快照过期轮数是否偏小。过期按本实例的轮数数，可对端一轮多长由对端自己的探测快慢决定：
+// URL数多时，URL全都超时的对端，一轮约是URL全都秒回的本实例的(间隔+超时)/间隔倍，对端也就隔这么多轮才产出一份新快照。
+// 过期轮数不比这个倍数大，对端每轮都会在本实例这里过期一次，判定分母里时有时无，离线告警、恢复跟着来回刷
+func expireRoundTooSmall(config model.Config) bool {
+	return config.SnapshotExpireRound*config.ProbeIntervalSec <= config.ProbeIntervalSec+config.ProbeTimeoutSec
 }
 
 // cleanUrls 去掉首尾空白、空项与重复项，保持原有顺序。

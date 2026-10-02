@@ -99,6 +99,28 @@ func TestParseCleanBackoff(t *testing.T) {
 	}
 }
 
+// 默认配置不能触发过期轮数偏小的提示；超时拉长到间隔的好几倍、过期轮数又没跟着调，就该提示
+func TestExpireRoundTooSmall(t *testing.T) {
+	ctx := util.GenCtx()
+	handler := new(ConfigHandler)
+
+	conf, err := handler.Parse(ctx, handler.GetDefault(ctx))
+	if err != nil {
+		t.Fatalf("默认配置应能解析: %+v", err)
+	}
+	if expireRoundTooSmall(conf) {
+		t.Fatalf("默认配置不该提示过期轮数偏小: %+v", conf)
+	}
+
+	conf, err = handler.Parse(ctx, "probe_interval_sec: 2\nprobe_timeout_sec: 10\nsnapshot_expire_round: 5\n")
+	if err != nil {
+		t.Fatalf("应能解析: %+v", err)
+	}
+	if !expireRoundTooSmall(conf) {
+		t.Fatalf("对端一轮最慢是本实例的6倍，过期轮数5该提示偏小: %+v", conf)
+	}
+}
+
 func TestParseIllegal(t *testing.T) {
 	ctx := util.GenCtx()
 	handler := new(ConfigHandler)
