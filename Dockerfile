@@ -14,11 +14,36 @@ RUN if [ -s survive_monitor ]; then \
 
 FROM golang:1.27-alpine
 COPY --from=builder /survive_monitor /survive_monitor
+RUN chmod 755 /survive_monitor
+ARG TZ="Asia/Shanghai"
+ENV TZ=${TZ}
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories
 RUN apk update
 RUN apk --no-cache add ca-certificates
-RUN apk add tzdata && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && echo "Asia/Shanghai" > /etc/timezone && apk del tzdata
+RUN apk --no-cache add tzdata && cp /usr/share/zoneinfo/${TZ} /etc/localtime && echo "${TZ}" > /etc/timezone
+
+ARG UID=1000
+ARG GID=1000
+
+RUN if getent group ${GID} >/dev/null 2>&1; then \
+        group_name=$(getent group ${GID} | cut -d: -f1); \
+    else \
+        group_name="survive_monitor"; \
+        addgroup -g ${GID} -S ${group_name}; \
+    fi && \
+    if getent passwd ${UID} >/dev/null 2>&1; then \
+        user_name=$(getent passwd ${UID} | cut -d: -f1); \
+    else \
+        user_name="survive_monitor"; \
+        adduser -u ${UID} -G "${group_name}" -S -D -H ${user_name}; \
+    fi && \
+    mkdir -p /log /resource && \
+    chown -R ${UID}:${GID} /log /resource && \
+    chmod 777 /log /resource
+
 VOLUME /log
+VOLUME /resource
 WORKDIR /
+USER ${UID}:${GID}
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget --spider -q http://127.0.0.1:4343/api/ping || exit 1
 CMD ["/survive_monitor"]

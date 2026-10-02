@@ -1,0 +1,7 @@
+.git
+.idea
+log
+resource
+doc
+*.log
+*.test
