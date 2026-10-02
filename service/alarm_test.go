@@ -138,7 +138,7 @@ func TestJudgeAlarmRecover(t *testing.T) {
 	}
 
 	//没发过告警就恢复，是从来没离线过，不该凭空发一条恢复
-	view.DelAlarm(ctx, "https://back/")
+	view.RecoverAlarm(ctx, "https://back/", now)
 	setView(t, ctx, map[string]bool{"https://back/": true}, nil)
 	_, recovers, _, _ = judgeAlarm(ctx, conf, now)
 	if len(recovers) != 0 {
@@ -151,10 +151,42 @@ func TestJudgeAlarmNoConclusion(t *testing.T) {
 	ctx := util.GenCtx()
 	conf := model.Config{Urls: []string{"https://unknown/"}, SnapshotExpireRound: 5, AlarmBackoffSec: []int{300}}
 
-	view.DelAlarm(ctx, "https://unknown/")
 	setView(t, ctx, map[string]bool{"https://other/": false}, nil)
 	offlines, recovers, _, _ := judgeAlarm(ctx, conf, 1700000000)
 	if len(offlines) != 0 || len(recovers) != 0 {
 		t.Fatalf("没结论该什么都不发，实际 offline=%+v recover=%+v", offlines, recovers)
+	}
+}
+
+// 告警记录在对端、而对端看不到本实例的结论(比如它探不到本实例)时，对端那条记录会一直留着。
+// 本实例只该发一次恢复，不能每轮都据此再发；对端之后开的新事件照样要认
+func TestJudgeAlarmRecoverOnce(t *testing.T) {
+	ctx := util.GenCtx()
+	url := "https://half/"
+	conf := model.Config{Urls: []string{url}, SnapshotExpireRound: 5, AlarmBackoffSec: []int{300}}
+	now := int64(1700000000)
+	mergePeer := func(peerTime int64, alarm model.Alarm) {
+		view.Merge(ctx, "https://peer-half/api/view", model.View{Snapshots: map[string]model.Snapshot{
+			model.SelfSource: {Id: "peer-half", Time: peerTime, Probes: map[string]bool{url: false}, Alarms: map[string]model.Alarm{url: alarm}},
+		}})
+	}
+
+	setView(t, ctx, map[string]bool{url: true}, nil)
+	mergePeer(now, model.Alarm{StartTime: now - 3600, LastSendTime: now - 60, SendCount: 2})
+	_, recovers, _, dels := judgeAlarm(ctx, conf, now)
+	if len(recovers) != 1 || len(dels) != 1 {
+		t.Fatalf("看到对端的告警记录、本实例说在线，该发一次恢复，实际 recover=%d del=%d", len(recovers), len(dels))
+	}
+	view.RecoverAlarm(ctx, url, now)
+
+	offlines, recovers, _, _ := judgeAlarm(ctx, conf, now+30)
+	if len(offlines) != 0 || len(recovers) != 0 {
+		t.Fatalf("对端还留着同一事件的记录，本实例不该重复发恢复，实际 offline=%d recover=%d", len(offlines), len(recovers))
+	}
+
+	mergePeer(now+200, model.Alarm{StartTime: now + 100, LastSendTime: now + 100, SendCount: 1})
+	_, recovers, _, _ = judgeAlarm(ctx, conf, now+230)
+	if len(recovers) != 1 {
+		t.Fatalf("对端在恢复之后开的新事件要认，该再发一次恢复，实际 %d 条", len(recovers))
 	}
 }

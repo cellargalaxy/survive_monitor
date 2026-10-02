@@ -44,8 +44,8 @@ func monitor(ctx context.Context, conf model.Config) {
 	}
 
 	alarmUrl(ctx, conf)
-	alarmResource(ctx, conf, resource)
-	view.Clean(ctx, conf.SnapshotExpireRound, conf.RecordWindowSec)
+	alarmResource(ctx, conf, resource, err == nil)
+	view.Clean(ctx, conf.Urls, conf.SnapshotExpireRound, conf.RecordWindowSec)
 }
 
 // probeUrls 逐个串行探测全部URL，每探完一个休眠probe_interval_sec，落下明细，并把解析到全局视图的那些按来源URL收集起来。

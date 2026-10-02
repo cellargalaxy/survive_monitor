@@ -78,8 +78,14 @@ func TestGinStatus(t *testing.T) {
 		t.Fatalf("看板至少该带上自己那条快照")
 	}
 	//前端健康条的时间轴靠这个字段铺，必须跟配置一致，不能是零值
-	if expect := config.GetConfig(ctx).RecordWindowSec; expect <= 0 || resp.Data.RecordWindowSec != expect {
+	conf := config.GetConfig(ctx)
+	if expect := conf.RecordWindowSec; expect <= 0 || resp.Data.RecordWindowSec != expect {
 		t.Errorf("明细窗口期望 %d，实际 %d", expect, resp.Data.RecordWindowSec)
+	}
+	//资源条按阈值标红，同样跟着配置走
+	if resp.Data.CpuUsageLimit != conf.CpuUsageLimit || resp.Data.MemUsageLimit != conf.MemUsageLimit || resp.Data.DiskUsageLimit != conf.DiskUsageLimit {
+		t.Errorf("资源阈值期望 %v/%v/%v，实际 %v/%v/%v", conf.CpuUsageLimit, conf.MemUsageLimit, conf.DiskUsageLimit,
+			resp.Data.CpuUsageLimit, resp.Data.MemUsageLimit, resp.Data.DiskUsageLimit)
 	}
 }
 

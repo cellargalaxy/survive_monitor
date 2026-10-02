@@ -24,7 +24,18 @@ var peerRounds = make(map[string]int64)
 // round 本实例当前是第几轮，每轮开头由NextRound加一
 var round int64
 var records = make(map[string][]model.Record)
-var resourceOverRound int
+
+// recoveredTimes URL -> 本实例发出恢复通知的时间。只留在本机、不进交换载荷。
+// 对端的告警记录只有对端自己能删，对端看不到本实例的结论时(比如它探不到本实例)会一直留着那条记录；
+// 本实例发完恢复后，起始时间不晚于恢复时间的记录一律当作已恢复的旧事件，否则每轮都会据此再发一遍恢复
+var recoveredTimes = make(map[string]int64)
+
+// resourceOver、resourceRound 本机资源当前是否超阈值，以及这个状态已经连续了几轮
+var resourceOver bool
+var resourceRound int
+
+// barSlotCount 看板健康条的格数，明细保留窗口按它等分
+const barSlotCount = 96
 
 func SelfId() string {
 	return selfId
@@ -89,7 +100,8 @@ func Judge(ctx context.Context, url string, expireRound int) (bool, bool, int) {
 	return judge(snapshotList(expireRound), url)
 }
 
-// GetAlarm 取全局最新的离线告警记录。自己的和对端的一起看，对端已经发过就轮不到自己再发
+// GetAlarm 取全局最新的离线告警记录。自己的和对端的一起看，对端已经发过就轮不到自己再发；
+// 本实例已经发过恢复的旧事件不算，见recoveredTimes
 func GetAlarm(ctx context.Context, url string, expireRound int) (model.Alarm, bool) {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -98,7 +110,7 @@ func GetAlarm(ctx context.Context, url string, expireRound int) (model.Alarm, bo
 	var exist bool
 	for _, snapshot := range snapshotList(expireRound) {
 		alarm, ok := snapshot.Alarms[url]
-		if !ok {
+		if !ok || recovered(url, alarm) {
 			continue
 		}
 		if !exist || alarm.LastSendTime > newest.LastSendTime {
@@ -109,21 +121,24 @@ func GetAlarm(ctx context.Context, url string, expireRound int) (model.Alarm, bo
 	return newest, exist
 }
 
+// SaveAlarm 写本实例的告警记录。交换载荷和看板拿走的是快照的浅拷贝，和这里共用同一个map，
+// 所以只能写时复制、不能原地改，否则出了锁之后的JSON序列化会和这里撞上map并发读写，进程直接崩
 func SaveAlarm(ctx context.Context, url string, alarm model.Alarm) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	if selfSnapshot.Alarms == nil {
-		selfSnapshot.Alarms = make(map[string]model.Alarm)
-	}
-	selfSnapshot.Alarms[url] = alarm
+	alarms := cloneAlarms(selfSnapshot.Alarms)
+	alarms[url] = alarm
+	selfSnapshot.Alarms = alarms
 }
 
-func DelAlarm(ctx context.Context, url string) {
+// RecoverAlarm 发完恢复之后调用：删掉本实例的告警记录，并记下恢复时间，对端还留着的同一事件的记录从此不再认
+func RecoverAlarm(ctx context.Context, url string, now int64) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	delete(selfSnapshot.Alarms, url)
+	delAlarm(url)
+	recoveredTimes[url] = now
 }
 
 // GetResourceAlarm 资源告警只看本机记录。资源是各实例自己采的，也就只有自己有资格判它持续超了多久
@@ -151,17 +166,18 @@ func DelResourceAlarm(ctx context.Context) {
 	selfSnapshot.ResourceAlarm = nil
 }
 
-// MarkResourceOver 累计本机资源连续超阈值的轮数，没超就归零，返回累计后的轮数
+// MarkResourceOver 记下本机资源本轮是否超阈值，返回这个状态已经连续了几轮(含本轮)。
+// 超与不超各自计数，状态一翻转就从1重新数
 func MarkResourceOver(ctx context.Context, over bool) int {
 	lock.Lock()
 	defer lock.Unlock()
 
-	if !over {
-		resourceOverRound = 0
-		return 0
+	if over != resourceOver {
+		resourceOver = over
+		resourceRound = 0
 	}
-	resourceOverRound++
-	return resourceOverRound
+	resourceRound++
+	return resourceRound
 }
 
 // GetView 组装交换载荷。自己那条的身份键要留空，交给接收方回填
@@ -172,22 +188,31 @@ func GetView(ctx context.Context, expireRound int) model.View {
 	return getView(expireRound)
 }
 
-// GetStatus 组装看板载荷。明细只有本实例的观测，各实例之间本就不要求一致
-func GetStatus(ctx context.Context, expireRound int) model.Status {
+// GetStatus 组装看板载荷。明细只有本实例的观测，各实例之间本就不要求一致。
+// 明细在这里就按窗口聚合成健康条，不把原始明细整份下发：7天窗口下原始明细有几十万条，看板每次拉取要好几MB
+func GetStatus(ctx context.Context, expireRound, windowSec int) model.Status {
 	lock.RLock()
 	defer lock.RUnlock()
 
-	copied := make(map[string][]model.Record, len(records))
+	now := time.Now().Unix()
+	bars := make(map[string][]int, len(records))
 	for url, list := range records {
-		copied[url] = append([]model.Record(nil), list...)
+		bars[url] = buildBar(list, windowSec, now)
 	}
-	return model.Status{View: getView(expireRound), Records: copied}
+	return model.Status{View: getView(expireRound), Bars: bars}
 }
 
-// Clean 清掉过期快照与窗口外明细。判定时本来就会跳过过期数据，这里只是别让内存一直涨
-func Clean(ctx context.Context, expireRound, windowSec int) {
+// Clean 清掉过期快照、窗口外明细，以及已经从配置里删掉的URL留下的明细和告警记录。
+// 判定时本来就会跳过过期数据，这里是别让内存一直涨，也别让删掉的URL的旧告警记录一直被交换出去，
+// 哪天重新加回来时还被当成同一事件续上退避
+func Clean(ctx context.Context, urls []string, expireRound, windowSec int) {
 	lock.Lock()
 	defer lock.Unlock()
+
+	configured := make(map[string]bool, len(urls))
+	for i := range urls {
+		configured[urls[i]] = true
+	}
 
 	now := time.Now().Unix()
 	for source := range peerSnapshots {
@@ -198,12 +223,83 @@ func Clean(ctx context.Context, expireRound, windowSec int) {
 	}
 	for url, list := range records {
 		list = trimRecords(list, windowSec, now)
-		if len(list) == 0 {
+		if len(list) == 0 || !configured[url] {
 			delete(records, url)
 			continue
 		}
 		records[url] = list
 	}
+	for url := range selfSnapshot.Alarms {
+		if !configured[url] {
+			delAlarm(url)
+		}
+	}
+	//恢复时间只是用来压住对端的旧记录，没有任何新鲜快照还带着这类旧记录了，它也就没用了
+	list := snapshotList(expireRound)
+	for url := range recoveredTimes {
+		stale := false
+		for i := range list {
+			if alarm, ok := list[i].Alarms[url]; ok && recovered(url, alarm) {
+				stale = true
+				break
+			}
+		}
+		if !stale {
+			delete(recoveredTimes, url)
+		}
+	}
+}
+
+// delAlarm 删本实例的告警记录，同样写时复制，见SaveAlarm。调用方必须已经持有锁
+func delAlarm(url string) {
+	if _, ok := selfSnapshot.Alarms[url]; !ok {
+		return
+	}
+	alarms := cloneAlarms(selfSnapshot.Alarms)
+	delete(alarms, url)
+	selfSnapshot.Alarms = alarms
+}
+
+func cloneAlarms(alarms map[string]model.Alarm) map[string]model.Alarm {
+	cloned := make(map[string]model.Alarm, len(alarms)+1)
+	for url, alarm := range alarms {
+		cloned[url] = alarm
+	}
+	return cloned
+}
+
+// recovered 这条告警记录是不是本实例已经发过恢复的旧事件。调用方必须已经持有锁
+func recovered(url string, alarm model.Alarm) bool {
+	recoverTime, ok := recoveredTimes[url]
+	return ok && alarm.StartTime <= recoverTime
+}
+
+// buildBar 把一个URL的明细按窗口等分成barSlotCount格。一格里只要有一次失败就标失败，宁可显眼也不要把抖动藏起来
+func buildBar(list []model.Record, windowSec int, now int64) []int {
+	bar := make([]int, barSlotCount)
+	if windowSec <= 0 {
+		return bar
+	}
+	begin := now - int64(windowSec)
+	span := float64(windowSec) / barSlotCount
+	for i := range list {
+		if list[i].Time < begin {
+			continue
+		}
+		index := int(float64(list[i].Time-begin) / span)
+		if index >= barSlotCount {
+			index = barSlotCount - 1
+		}
+		if bar[index] == model.BarOffline {
+			continue
+		}
+		if list[i].Alive {
+			bar[index] = model.BarOnline
+		} else {
+			bar[index] = model.BarOffline
+		}
+	}
+	return bar
 }
 
 func trimRecords(list []model.Record, windowSec int, now int64) []model.Record {

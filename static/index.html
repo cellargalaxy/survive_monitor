@@ -121,7 +121,16 @@
 
 <script>
   var REFRESH_MS = 30000;
+  // 只在某个URL还没有本实例的明细时用来画一条全灰的条，有明细时格数以后端给的为准
   var SLOT_COUNT = 96;
+  var BAR_CLASS = {1: 'online', 2: 'offline'};
+
+  // URL、实例标识都可能来自对端转发的快照，拼进HTML之前必须转义，否则任何一个被探测的地址都能往看板里塞脚本
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, function (char) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char];
+    });
+  }
 
   // 看板和接口挂在同一个服务上，所以按当前页面路径回推接口前缀，反代挂了子路径也能用
   function apiUrl(name) {
@@ -180,51 +189,33 @@
     return {state: online ? 'online' : 'offline', count: count};
   }
 
-  function buildSlots(records, windowSec) {
-    var slots = new Array(SLOT_COUNT);
-    for (var i = 0; i < SLOT_COUNT; i++) slots[i] = null;
-    if (!records || !records.length) return slots;
-
-    var end = Math.floor(Date.now() / 1000);
-    var begin = end - windowSec;
-    var span = windowSec / SLOT_COUNT;
-    for (var r = 0; r < records.length; r++) {
-      var record = records[r];
-      if (record.time < begin) continue;
-      var index = Math.floor((record.time - begin) / span);
-      if (index < 0) index = 0;
-      if (index >= SLOT_COUNT) index = SLOT_COUNT - 1;
-      // 一个槽里只要有一次失败就标失败，宁可显眼也不要把抖动藏起来
-      if (slots[index] === false) continue;
-      slots[index] = !!record.alive;
-    }
-    return slots;
-  }
-
-  function resourceItem(name, used, total, percent) {
-    var cls = percent >= 90 ? 'over' : (percent >= 70 ? 'warn' : '');
-    var detail = total ? formatSize(used) + ' / ' + formatSize(total) : percent.toFixed(1) + '%';
+  // 达到告警阈值标红，阈值往下20个点内标橙；阈值跟着后端配置走，老版本后端没有这几个字段，按90兜底
+  function resourceItem(name, detail, percent, limit) {
+    limit = limit > 0 ? limit : 90;
+    var cls = percent >= limit ? 'over' : (percent >= limit - 20 ? 'warn' : '');
     return '<div class="item"><div class="cap"><span>' + name + '</span><b>' + detail + '</b></div>'
       + '<div class="track"><span class="' + cls + '" style="width:' + Math.min(100, percent).toFixed(1) + '%"></span></div></div>';
   }
 
-  function resourceHtml(resource) {
+  function sizeDetail(used, total, percent) {
+    return total ? formatSize(used) + ' / ' + formatSize(total) : percent.toFixed(1) + '%';
+  }
+
+  function resourceHtml(resource, status) {
     if (!resource || !resource.time) return '';
     var cpuPercent = resource.cpu_num > 0 ? resource.cpu_usage / resource.cpu_num : 0;
     var memPercent = resource.mem_total > 0 ? resource.mem_used / resource.mem_total * 100 : 0;
     var diskPercent = resource.disk_total > 0 ? resource.disk_used / resource.disk_total * 100 : 0;
-    var cpuCls = cpuPercent >= 90 ? 'over' : (cpuPercent >= 70 ? 'warn' : '');
-    var cpuHtml = '<div class="item"><div class="cap"><span>CPU · ' + resource.cpu_num + '核</span><b>' + cpuPercent.toFixed(1) + '%</b></div>'
-      + '<div class="track"><span class="' + cpuCls + '" style="width:' + Math.min(100, cpuPercent).toFixed(1) + '%"></span></div></div>';
-    return '<div class="res">' + cpuHtml
-      + resourceItem('内存', resource.mem_used, resource.mem_total, memPercent)
-      + resourceItem('磁盘', resource.disk_used, resource.disk_total, diskPercent)
+    return '<div class="res">'
+      + resourceItem('CPU · ' + resource.cpu_num + '核', cpuPercent.toFixed(1) + '%', cpuPercent, status.cpu_usage_limit)
+      + resourceItem('内存', sizeDetail(resource.mem_used, resource.mem_total, memPercent), memPercent, status.mem_usage_limit)
+      + resourceItem('磁盘', sizeDetail(resource.disk_used, resource.disk_total, diskPercent), diskPercent, status.disk_usage_limit)
       + '</div>';
   }
 
   function render(status) {
     var snapshots = (status.view && status.view.snapshots) || {};
-    var records = status.records || {};
+    var bars = status.bars || {};
     var now = Math.floor(Date.now() / 1000);
 
     // 探测过的URL取自各实例的结论并集，这样对端探了而自己还没探的URL也看得到
@@ -233,7 +224,7 @@
       var probes = snapshots[key].probes || {};
       for (var url in probes) urlSet[url] = true;
     }
-    for (var url2 in records) urlSet[url2] = true;
+    for (var url2 in bars) urlSet[url2] = true;
 
     // 实例URL不另行配置，谁的响应被解析出过快照，它就是实例；这里反过来按身份键认出来
     var instanceSet = {};
@@ -277,7 +268,7 @@
     for (var d = 0; d < domains.length; d++) {
       var domain = domains[d];
       var list = groups[domain];
-      html += '<div class="group"><div class="title">' + domain + '<span class="count">' + list.length + '个URL</span></div>';
+      html += '<div class="group"><div class="title">' + escapeHtml(domain) + '<span class="count">' + list.length + '个URL</span></div>';
       for (var j = 0; j < list.length; j++) {
         var row = list[j];
         var snapshot = instanceSet[row.url];
@@ -295,17 +286,18 @@
         }
         if (alarm) tags += '<span class="tag alarm">已告警 · 离线' + formatDuration(now - alarm.start_time) + '</span>';
 
-        var slots = buildSlots(records[row.url], windowSec);
+        // 健康条由后端按窗口聚合好，一格里只要有一次失败就标失败
+        var slots = bars[row.url] || new Array(SLOT_COUNT);
         var bar = '';
         for (var s = 0; s < slots.length; s++) {
-          bar += '<i class="' + (slots[s] === true ? 'online' : (slots[s] === false ? 'offline' : '')) + '"></i>';
+          bar += '<i class="' + (BAR_CLASS[slots[s]] || '') + '"></i>';
         }
 
         html += '<div class="row"><div class="line"><span class="dot ' + row.result.state + '"></span>'
-          + '<span class="path">' + row.path + '</span>' + tags + '</div>'
+          + '<span class="path">' + escapeHtml(row.path) + '</span>' + tags + '</div>'
           + '<div class="bar">' + bar + '</div>'
           + '<div class="bar-axis"><span>' + formatDuration(windowSec) + '前</span><span>现在</span></div>'
-          + (snapshot ? resourceHtml(snapshot.resource) : '')
+          + (snapshot ? resourceHtml(snapshot.resource, status) : '')
           + '</div>';
       }
       html += '</div>';
@@ -314,9 +306,9 @@
     // 自己那条的身份键是空的，没有对应的URL可挂，单独列出来
     if (snapshots['']) {
       html += '<div class="group"><div class="title">本实例<span class="count">自己的观测与资源</span></div>'
-        + '<div class="row"><div class="line"><span class="dot online"></span><span class="path">' + (snapshots[''].id || '-') + '</span>'
+        + '<div class="row"><div class="line"><span class="dot online"></span><span class="path">' + escapeHtml(snapshots[''].id || '-') + '</span>'
         + '<span class="tag">采集于 ' + formatTime(snapshots[''].time) + '</span></div>'
-        + resourceHtml(snapshots[''].resource) + '</div></div>';
+        + resourceHtml(snapshots[''].resource, status) + '</div></div>';
     }
 
     document.getElementById('body').innerHTML = html;

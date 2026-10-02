@@ -37,7 +37,7 @@ func alarmUrl(ctx context.Context, conf model.Config) {
 		view.SaveAlarm(ctx, url, saves[url])
 	}
 	for i := range dels {
-		view.DelAlarm(ctx, dels[i])
+		view.RecoverAlarm(ctx, dels[i], now)
 	}
 	logrus.WithContext(ctx).WithFields(logrus.Fields{"offline": len(offlineTexts), "recover": len(recoverTexts)}).Info("发送服务告警，完成")
 }
@@ -80,15 +80,26 @@ func judgeAlarm(ctx context.Context, conf model.Config, now int64) ([]string, []
 }
 
 // alarmResource 本机资源的阈值告警。资源是各实例自己采的，也就只有自己有资格判它持续超了几轮，
-// 别的服务器超没超由它自己那个实例去告警
-func alarmResource(ctx context.Context, conf model.Config, resource model.Resource) {
+// 别的服务器超没超由它自己那个实例去告警。
+// 告警与恢复都要连续resource_round轮才算：只要求告警攒轮数的话，卡在阈值附近抖动时会告警、恢复来回刷，退避也压不住，
+// 因为恢复会把记录删掉，下一次告警又从首发算起。
+// complete是本轮各项是否都采到了：采不到的项是零值，零值不会误报超阈值，却会误报恢复，所以没采全时不据此判恢复
+func alarmResource(ctx context.Context, conf model.Config, resource model.Resource, complete bool) {
 	now := time.Now().Unix()
 	overTexts := getOverTexts(conf, resource)
+	if len(overTexts) == 0 && !complete {
+		logrus.WithContext(ctx).WithFields(logrus.Fields{}).Warn("本机资源没采全，本轮不判恢复")
+		return
+	}
 	round := view.MarkResourceOver(ctx, len(overTexts) > 0)
 	alarm, exist := view.GetResourceAlarm(ctx)
 
 	if len(overTexts) == 0 {
 		if !exist {
+			return
+		}
+		if round < conf.ResourceRound {
+			logrus.WithContext(ctx).WithFields(logrus.Fields{"round": round, "limit": conf.ResourceRound}).Info("本机资源回落到阈值以下，尚未攒够轮数")
 			return
 		}
 		err := util.SendWxMsg(ctx, "", fmt.Sprintf("资源恢复\n%s", getResourceText(resource)))

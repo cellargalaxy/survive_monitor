@@ -18,10 +18,20 @@ type View struct {
 	Snapshots map[string]Snapshot `json:"snapshots"` //身份键 -> 快照
 }
 
+// 健康条每一格的状态
+const (
+	BarUnknown = 0 //这一格没有明细
+	BarOnline  = 1 //这一格的探测全部成功
+	BarOffline = 2 //这一格至少失败过一次
+)
+
 type Status struct {
-	View            View                `json:"view"`              //全局视图
-	Records         map[string][]Record `json:"records"`           //URL -> 探测明细，只有本实例的观测，各实例之间不要求一致
-	RecordWindowSec int                 `json:"record_window_sec"` //明细保留窗口，秒；看板健康条按它铺满，跟着配置走
+	View            View             `json:"view"`              //全局视图
+	Bars            map[string][]int `json:"bars"`              //URL -> 健康条，明细保留窗口等分成若干格，取值见BarUnknown等；只有本实例的观测，各实例之间不要求一致
+	RecordWindowSec int              `json:"record_window_sec"` //明细保留窗口，秒；看板健康条按它铺满，跟着配置走
+	CpuUsageLimit   float64          `json:"cpu_usage_limit"`   //资源告警阈值，看板资源条按它标红，跟着配置走
+	MemUsageLimit   float64          `json:"mem_usage_limit"`
+	DiskUsageLimit  float64          `json:"disk_usage_limit"`
 }
 
 type Record struct {

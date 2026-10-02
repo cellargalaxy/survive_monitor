@@ -22,7 +22,7 @@ type Config struct {
 	CpuUsageLimit       float64  `json:"cpu_usage_limit" yaml:"cpu_usage_limit"`             //CPU使用率告警阈值，占总核数的百分比
 	MemUsageLimit       float64  `json:"mem_usage_limit" yaml:"mem_usage_limit"`             //内存使用率告警阈值，百分比
 	DiskUsageLimit      float64  `json:"disk_usage_limit" yaml:"disk_usage_limit"`           //磁盘使用率告警阈值，百分比
-	ResourceRound       int      `json:"resource_round" yaml:"resource_round"`               //资源连续超阈值多少轮才告警
+	ResourceRound       int      `json:"resource_round" yaml:"resource_round"`               //资源连续超阈值多少轮才告警；恢复同样要连续这么多轮不超，免得在阈值附近抖动时告警、恢复来回刷
 }
 
 func (this Config) String() string {

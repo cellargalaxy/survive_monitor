@@ -22,7 +22,7 @@ const (
 	cpuUsageLimit       = 90     //CPU使用率告警阈值：90%
 	memUsageLimit       = 90     //内存使用率告警阈值：90%
 	diskUsageLimit      = 90     //磁盘使用率告警阈值：90%
-	resourceRound       = 3      //资源连续3轮超阈值才告警
+	resourceRound       = 3      //资源连续3轮超阈值才告警，连续3轮不超才恢复
 )
 
 // alarmBackoffSec 告警退避阶梯：首发之后5分钟、30分钟、2小时，之后保持2小时

@@ -251,7 +251,7 @@ func TestCleanExpire(t *testing.T) {
 	peerRounds = map[string]int64{"fresh": 99, "stale": 90}
 	lock.Unlock()
 
-	Clean(ctx, 3, 600)
+	Clean(ctx, nil, 3, 600)
 
 	lock.RLock()
 	defer lock.RUnlock()
@@ -263,5 +263,99 @@ func TestCleanExpire(t *testing.T) {
 	}
 	if _, ok := peerSnapshots["fresh"]; !ok {
 		t.Errorf("新鲜快照不该被清掉")
+	}
+}
+
+// 交换载荷和看板拿走的快照和自己那条共用告警map，写告警记录必须写时复制，
+// 否则出了锁之后的JSON序列化会和写入撞上map并发读写
+func TestSaveAlarmCopyOnWrite(t *testing.T) {
+	ctx := util.GenCtx()
+	SaveAlarm(ctx, "https://cow/a", model.Alarm{StartTime: 1})
+	before := GetView(ctx, 5).Snapshots[model.SelfSource].Alarms
+
+	SaveAlarm(ctx, "https://cow/b", model.Alarm{StartTime: 2})
+	RecoverAlarm(ctx, "https://cow/a", 10)
+	if _, ok := before["https://cow/b"]; ok {
+		t.Fatalf("已经交出去的map不许被原地新增")
+	}
+	if _, ok := before["https://cow/a"]; !ok {
+		t.Fatalf("已经交出去的map不许被原地删除")
+	}
+	after := GetView(ctx, 5).Snapshots[model.SelfSource].Alarms
+	if _, ok := after["https://cow/a"]; ok {
+		t.Fatalf("恢复之后自己的记录该删掉")
+	}
+	if _, ok := after["https://cow/b"]; !ok {
+		t.Fatalf("新写的记录该在")
+	}
+}
+
+// 告警与恢复都要连续攒轮数，状态一翻转就从1重新数
+func TestMarkResourceOver(t *testing.T) {
+	ctx := util.GenCtx()
+	MarkResourceOver(ctx, true)
+	steps := []struct {
+		over   bool
+		expect int
+	}{{false, 1}, {false, 2}, {true, 1}, {true, 2}, {true, 3}, {false, 1}}
+	for i := range steps {
+		if actual := MarkResourceOver(ctx, steps[i].over); actual != steps[i].expect {
+			t.Errorf("第 %d 步 over=%v 期望 %d，实际 %d", i, steps[i].over, steps[i].expect, actual)
+		}
+	}
+}
+
+// 健康条与原先前端的口径一致：窗口外的不要，一格里有一次失败就标失败，落在窗口末尾的算最后一格
+func TestBuildBar(t *testing.T) {
+	now := int64(10000)
+	window := 960 //每格10秒
+	bar := buildBar([]model.Record{
+		{Time: now - 2000, Alive: false}, //窗口外
+		{Time: now - 955, Alive: true},   //第0格
+		{Time: now - 945, Alive: false},  //第1格
+		{Time: now - 941, Alive: true},   //第1格，失败过就保持失败
+		{Time: now, Alive: true},         //窗口末尾，算最后一格
+	}, window, now)
+
+	if len(bar) != barSlotCount {
+		t.Fatalf("格数期望 %d，实际 %d", barSlotCount, len(bar))
+	}
+	if bar[0] != model.BarOnline || bar[1] != model.BarOffline || bar[2] != model.BarUnknown || bar[barSlotCount-1] != model.BarOnline {
+		t.Fatalf("健康条不对，实际: %+v", bar)
+	}
+	for _, slot := range buildBar(nil, window, now) {
+		if slot != model.BarUnknown {
+			t.Fatalf("没有明细时每格都该是未知")
+		}
+	}
+}
+
+// 从配置里删掉的URL，明细与自己的告警记录要一起清掉；恢复时间在没有旧记录可压之后也要清掉
+func TestCleanUnconfigured(t *testing.T) {
+	ctx := util.GenCtx()
+	SaveRecord(ctx, "https://keep/", true, 600)
+	SaveRecord(ctx, "https://drop/", true, 600)
+	SaveAlarm(ctx, "https://keep/", model.Alarm{StartTime: 1})
+	SaveAlarm(ctx, "https://drop/", model.Alarm{StartTime: 1})
+	RecoverAlarm(ctx, "https://gone/", 10)
+
+	Clean(ctx, []string{"https://keep/"}, 5, 600)
+
+	lock.RLock()
+	defer lock.RUnlock()
+	if _, ok := records["https://drop/"]; ok {
+		t.Errorf("删掉的URL的明细该清掉")
+	}
+	if _, ok := records["https://keep/"]; !ok {
+		t.Errorf("还在配置里的URL的明细不该清掉")
+	}
+	if _, ok := selfSnapshot.Alarms["https://drop/"]; ok {
+		t.Errorf("删掉的URL的告警记录该清掉")
+	}
+	if _, ok := selfSnapshot.Alarms["https://keep/"]; !ok {
+		t.Errorf("还在配置里的URL的告警记录不该清掉")
+	}
+	if _, ok := recoveredTimes["https://gone/"]; ok {
+		t.Errorf("没有旧记录可压的恢复时间该清掉")
 	}
 }
